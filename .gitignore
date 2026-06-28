@@ -5,6 +5,9 @@ __pycache__/
 .ipynb_checkpoints/
 .pytest_cache/
 
+# nbconvert build artefacts (executed copies of source notebooks)
+notebooks/*.executed.ipynb
+
 # data: raw OULAD CSVs are not committed; processed artefacts are not committed.
 data/raw/
 data/processed/
