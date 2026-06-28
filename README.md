@@ -28,7 +28,7 @@ pip install -r requirements.txt
 python -m src.pipeline
 
 # 3. Open the EDA notebook
-jupyter notebook notebooks/01_eda.ipynb
+jupyter notebook notebooks/01_exploratory_data_analysis.ipynb
 ```
 
 ### Downloading OULAD
