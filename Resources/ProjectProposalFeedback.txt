@@ -1,0 +1,3 @@
+Strengths: Your project on personalized educational content recommendation is relevant and research focused. The presentation explained the motivation clearly, and the comparison with existing recommendation methods showed good research and planning.
+
+Areas for Improvement: Try to explain more clearly how recommendation accuracy and learning improvement will be evaluated in the final system. Adding more visual examples of the recommendation process can also improve the presentation.
