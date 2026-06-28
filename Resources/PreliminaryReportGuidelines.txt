@@ -1,0 +1,55 @@
+Preminilary Report Instructions
+
+Overview
+In this staff graded assignment you are to submit a preliminary draft of some aspects of your project report. The report must consist of four chapters, and have a total maximum word limit of 6000 words (excluding title page, reference list, etc). The chapters required are:
+
+An introduction: this explains the project concept and motivation for the project (this can be based on your proposal). This must also state which project template you are using (max 1000 words).
+
+A literature review: this is a revised version of the document that you submitted for your second peer review (max 2500 words).
+
+A design: this is a revised version of the document that you submitted for your third peer review (max 2000 words).
+
+A feature prototype: this is the only new element of the submission, details below (max 1500 words).
+
+The per-chapter maximums are strict, as is the overall word count. Note that the total of the four chapter word counts is 7000 --- this is not an error but it allows you flexibility in the lengths of each chapter, and lets you balance the document to some extent.
+
+You can return to the 3 peer reviews for instructions on the first three parts of this submission. 
+
+The feature prototype should be an implementation of at least one of the most important technical features used in the project to show that it is feasible. It should work as designed, but it is ok at this stage if developing the prototype shows that the feature is not as effective as you expected. 
+
+You should describe the prototype in the final chapter of your preliminary report, together with an evaluation of how well you think the prototype works and how you would improve it. This evaluation should be according to appropriate approaches in the particular area you are working in --- for example, evaluation in the Machine Learning area may not be appropriate in the Web Development area. The evaluation you use must be appropriate for your particular project. It is even better if you are able to link your chosen evaluation approach to related background work.
+
+You must also submit a 3-5 minute video that demonstrates the prototype together with any motivation and discussion that you feel is appropriate. Your video format MUST be MP4.
+No other formats will be accepted for marking.
+
+
+Review Criteria
+You will be marked according to the following criteria:
+
+Is the report clear, well-formatted, and coherent?
+
+Does the report display knowledge of the area of study, previous work and academic literature?
+
+Does the report critically evaluate the previous work and/or academic literature?
+
+Does the report use proper citation and referencing?
+
+Is the design of the project clear and of high quality?
+
+Is the project concept justified based on the domain and users?
+
+Is the workplan explained in enough detail?
+
+Is the workplan feasible?
+
+Is the evaluation strategy appropriate to the aims of the project?
+
+Is the feature prototype of high quality?
+
+Is the feature prototype technically challenging?
+
+Is the demonstration of the prototype effective and impactful?
+
+Does the report successfully evaluate the feature prototype and show suitable improvements if appropriate?
+
+Does the work demonstrate innovation and excellence beyond the above?
