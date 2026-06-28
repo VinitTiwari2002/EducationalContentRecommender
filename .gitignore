@@ -1,0 +1,15 @@
+.DS_Store
+.claude/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+
+# data: raw OULAD CSVs are not committed; processed artefacts are not committed.
+data/raw/
+data/processed/
+*.zip
+
+# environment
+.venv/
+venv/
