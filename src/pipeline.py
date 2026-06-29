@@ -1,9 +1,16 @@
 """End-to-end pipeline runner.
 
 Usage:
-    python -m src.pipeline                     # full run (load, split, evaluate)
+    python -m src.pipeline                     # full run with course-scoping (default)
     python -m src.pipeline --rebuild-split     # force rebuild of cached split
     python -m src.pipeline --k 5 10 20         # evaluate at multiple K
+    python -m src.pipeline --no-course-scoping # diagnostic: skip per-user
+                                                  candidate restriction
+
+The --no-course-scoping flag is a diagnostic only. It lets recommenders
+propose any item in the global catalogue, ignoring which presentation each
+user is enrolled in. Comparing the two runs is what surfaced the
+course-scoping methodological finding documented in the prelim report.
 
 Outputs:
     data/processed/{train,test}.npz            # cached split
@@ -39,15 +46,27 @@ def _relevant_per_user(test: sparse.csr_matrix) -> dict[int, list[int]]:
 
 
 def _recommend_all(
-    model, n_users: int, k: int, user_candidates: list[np.ndarray]
+    model, n_users: int, k: int, user_candidates: list[np.ndarray] | None
 ) -> dict[int, list[int]]:
+    """Generate top-K recommendations for every user.
+
+    When user_candidates is None, the recommender sees the full catalogue
+    (the --no-course-scoping diagnostic mode). Otherwise it restricts to
+    the user's enrolled-presentation items.
+    """
+    if user_candidates is None:
+        return {u: model.recommend(u, k=k) for u in range(n_users)}
     return {
         u: model.recommend(u, k=k, candidates=user_candidates[u])
         for u in range(n_users)
     }
 
 
-def run(rebuild_split: bool, k_values: list[int]) -> pd.DataFrame:
+def run(
+    rebuild_split: bool,
+    k_values: list[int],
+    course_scoping: bool = True,
+) -> pd.DataFrame:
     cache_exists = (PROCESSED_DIR / "train.npz").exists() and (
         PROCESSED_DIR / "user_candidates.npy"
     ).exists()
@@ -75,6 +94,13 @@ def run(rebuild_split: bool, k_values: list[int]) -> pd.DataFrame:
         f"min={candidate_sizes.min()}, median={int(np.median(candidate_sizes))}, "
         f"mean={candidate_sizes.mean():.1f}, max={candidate_sizes.max()}"
     )
+    if not course_scoping:
+        print(
+            "\n*** DIAGNOSTIC MODE: course-scoping DISABLED ***\n"
+            "Recommenders will see the full catalogue, ignoring per-user enrolment.\n"
+            "This reproduces the pathological Popularity@K result reported in the\n"
+            "prelim report and is NOT the production configuration.\n"
+        )
 
     models = {
         "Random": RandomRecommender(seed=0),
@@ -83,6 +109,7 @@ def run(rebuild_split: bool, k_values: list[int]) -> pd.DataFrame:
 
     relevant = _relevant_per_user(split.test)
     n_users = split.train.shape[0]
+    candidates = split.user_candidates if course_scoping else None
     rows = []
     for model_name, model in models.items():
         print(f"Fitting {model_name}...")
@@ -90,7 +117,7 @@ def run(rebuild_split: bool, k_values: list[int]) -> pd.DataFrame:
         for k in k_values:
             print(f"  Generating top-{k} recommendations...")
             recs = _recommend_all(
-                model, n_users=n_users, k=k, user_candidates=split.user_candidates
+                model, n_users=n_users, k=k, user_candidates=candidates
             )
             metrics = evaluate(recs, relevant, k=k)
             rows.append({"model": model_name, "k": k, **metrics})
@@ -98,7 +125,8 @@ def run(rebuild_split: bool, k_values: list[int]) -> pd.DataFrame:
 
     results = pd.DataFrame(rows)
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = EVAL_DIR / "baseline_results.csv"
+    suffix = "" if course_scoping else "_no_course_scoping"
+    out_path = EVAL_DIR / f"baseline_results{suffix}.csv"
     results.to_csv(out_path, index=False)
     print(f"\nResults saved to {out_path}")
     return results
@@ -108,8 +136,23 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rebuild-split", action="store_true")
     parser.add_argument("--k", type=int, nargs="+", default=[5, 10, 20])
+    parser.add_argument(
+        "--no-course-scoping",
+        dest="course_scoping",
+        action="store_false",
+        help=(
+            "Diagnostic: disable per-user course-scoped candidate restriction. "
+            "Reproduces the pathological Popularity@K result documented in the "
+            "prelim report. NOT the production configuration."
+        ),
+    )
+    parser.set_defaults(course_scoping=True)
     args = parser.parse_args()
-    run(rebuild_split=args.rebuild_split, k_values=args.k)
+    run(
+        rebuild_split=args.rebuild_split,
+        k_values=args.k,
+        course_scoping=args.course_scoping,
+    )
 
 
 if __name__ == "__main__":
