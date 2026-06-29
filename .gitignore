@@ -8,6 +8,14 @@ __pycache__/
 # nbconvert build artefacts (executed copies of source notebooks)
 notebooks/*.executed.ipynb
 
+# LaTeX/pandoc intermediates (pandoc usually cleans up but just in case)
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+
 # data: raw OULAD CSVs are not committed; processed artefacts are not committed.
 data/raw/
 data/processed/
