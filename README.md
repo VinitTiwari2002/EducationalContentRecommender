@@ -24,7 +24,7 @@ source .venv/bin/activate            # macOS / Linux
 pip install -r requirements.txt
 
 # 1. Download OULAD into data/raw/ (manual step; see below)
-# 2. Run the pipeline end-to-end:
+# 2. Run the pipeline end-to-end (caches the split, evaluates baselines):
 python -m src.pipeline
 
 # 3. Open the EDA notebook
@@ -48,20 +48,51 @@ data/raw/
 └── vle.csv
 ```
 
+## Run the tests
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+The 25 unit tests cover the metric implementations, both baselines, candidate-pool
+restriction, and edge cases.
+
+## Build the preliminary report PDF
+
+The report sources live in `Preliminary-Report/`. To rebuild the PDF you need
+[pandoc](https://pandoc.org/installing.html), a LaTeX engine (xelatex), and
+[pandoc-crossref](https://github.com/lierdakil/pandoc-crossref) installed. On
+macOS:
+
+```bash
+brew install pandoc basictex pandoc-crossref
+sudo installer -pkg /usr/local/Caskroom/basictex/*/mactex-basictex-*.pkg -target /
+eval "$(/usr/libexec/path_helper)"
+```
+
+Then:
+
+```bash
+cd Preliminary-Report
+./build.sh
+```
+
+This concatenates the title page, four chapters, and reference list into
+`prelim-report.pdf`. Design figures are generated separately by
+`scripts/generate_design_figures.py`; EDA figures are produced by the notebook.
+
 ## Layout
 
 ```
-src/                # production code
-  oulad.py            # data loader
-  preprocess.py       # interaction matrix + temporal split
-  metrics.py          # evaluation framework
-  baselines.py        # Random + Popularity recommenders
-  pipeline.py         # end-to-end runner
-notebooks/          # EDA + experiment notebooks
-data/               # not committed; raw + processed datasets
-evaluation/         # results CSVs + figures
-tests/              # unit tests
-Preliminary-Report/ # report chapters and assembly
+src/                # production code (loader, preprocessing, metrics, baselines, pipeline)
+tests/              # unit tests for src/
+notebooks/          # exploratory data analysis
+scripts/            # one-shot reproducibility scripts (e.g. design-figure generator)
+data/               # not committed; raw + processed datasets land here
+evaluation/         # results CSVs from the pipeline
+Preliminary-Report/ # report chapter sources, figures, build script, and PDF
+Proposal/           # proposal submission artefacts (video plan, narration, slides, MP4)
+Resources/          # marker feedback, transcripts, guidelines (read-only)
 ```
 
 ## License
