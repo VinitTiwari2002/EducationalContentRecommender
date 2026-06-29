@@ -2,7 +2,7 @@
 
 ## Project Concept
 
-For my final project under the **CM3005 Data Science**, I am building a hybrid recommendation engine that suggests learning resources to individual learners. The engine combines three signals: how similar learners engaged with content (collaborative filtering), the characteristics of the resources themselves (feature-based content filtering), and the assessment outcomes that followed the engagement. I implement the system as a Python pipeline with a FastAPI service for recommendation queries and a Streamlit dashboard for inspection. I evaluate it offline on the Open University Learning Analytics Dataset (OULAD), which contains 32,593 students, over 10 million Virtual Learning Environment (VLE) interactions, and linked assessment results across seven distance-learning courses.
+For my final project, I am building a hybrid recommendation engine that suggests learning resources to individual learners. The engine combines three signals: how similar learners engaged with content (collaborative filtering), the characteristics of the resources themselves (feature-based content filtering), and the assessment outcomes that followed the engagement. I implement the system as a Python pipeline with a FastAPI service for recommendation queries and a Streamlit dashboard for inspection. I evaluate it offline on the Open University Learning Analytics Dataset (OULAD), which contains 32,593 students, over 10 million Virtual Learning Environment (VLE) interactions, and linked assessment results across seven distance-learning courses.
 
 ## Motivation
 

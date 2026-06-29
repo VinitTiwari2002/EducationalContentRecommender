@@ -1,6 +1,6 @@
 ---
 title: "Data-Driven Personalised Educational Content Recommendation"
-subtitle: "Preliminary Project Report — CM3070 Final Project (CM3005 Data Science)"
+subtitle: "Preliminary Project Report — CM3070 Final Project"
 author:
   - Vinit Tiwari (Student ID 220174440)
   - "Source code: \\url{https://github.com/VinitTiwari2002/EducationalContentRecommender}"
