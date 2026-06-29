@@ -72,28 +72,6 @@ The first four are standard and benchmarked against the prior literature. The fi
 
 The link between this evaluation strategy and the literature reviewed in [@sec:lit-review] is explicit. Temporal splitting follows Ricci et al. (2015). NDCG as the primary metric follows the implicit-feedback argument of Rendle et al. (2012). The choice to evaluate ranking quality rather than rating prediction is informed by the critique of pure-prediction evaluation that Thai-Nghe et al. (2010) leave unaddressed, and by the methodological caution that Wilson et al.'s critique of DKT (2016) imposes on any model claiming improvement.
 
-## Work Plan
-
-The project follows a 24-week plan, of which weeks 1–10 are complete or in progress at the time of this submission. Table 3.2 summarises the schedule.
-
-| Wk | Phase | Deliverable | Status |
-|---:|---|---|---|
-| 1–4 | Proposal | Proposal video + plan | Done — Submitted |
-| 5–6 | EDA + repo setup | Notebook with key OULAD findings | Done — In this submission |
-| 7–8 | Preprocessing | Interaction matrix, feature vectors, temporal split | Done — In this submission |
-| 9–10 | Baselines + Prelim report | Random + Popularity + evaluation harness | Done — This submission |
-| 11–12 | Collaborative filtering | SVD with hyperparameter tuning | Planned |
-| 13–14 | Content-based | Feature-similarity recommender | Planned |
-| 15–16 | Hybrid + ablation | Weighted ensemble + significance tests | Planned |
-| 17–18 | API + dashboard + draft report | FastAPI + Streamlit + draft submission | Planned |
-| 19–20 | Final evaluation | Cross-validation, all figures, ablation | Planned |
-| 21–22 | Report writing + exam | Final report drafts; exam preparation | Planned |
-| 23–24 | Video + final submission | MP4 demo; submission-ready code | Planned |
-
-*Table 3.2 — 24-week project plan. Total committed effort 150 hours, of which approximately 28 are spent at the time of this submission; remaining work is paced at ~7.5 h/week with a 14-hour reserve.*
-
-The plan is feasible because the technically novel steps (SVD, content similarity, hybrid weighting) each use library implementations with established performance characteristics; the project's contribution is in their combination and evaluation, not in implementing new algorithms from scratch.
-
 ## Ethics, DEI, and Risks
 
 OULAD contains sensitive demographic attributes — gender, age band, region, IMD (Index of Multiple Deprivation) band, disability flag — for every student. The project handles these as follows. First, recommendations are never conditioned on demographic attributes directly; the model sees only behavioural and content features. Second, the evaluation report includes a *fairness audit*: per-metric performance is broken down by gender, IMD band, and disability flag, to surface any group for whom the recommender systematically underperforms. This is consistent with the recommendation-system fairness literature and addresses the project's DEI learning objective in a concrete and measurable way. Third, no demographic data is published or shared beyond aggregate metrics in the report; the raw OULAD CSVs are listed in `.gitignore` and are not committed to the repository.
