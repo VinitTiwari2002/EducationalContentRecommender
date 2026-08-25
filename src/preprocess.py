@@ -77,18 +77,31 @@ class Split:
         )
 
 
-def build_split(data: OULAD, test_fraction: float = 0.2) -> Split:
+def build_split(
+    data: OULAD, test_fraction: float = 0.2, decay_rate: float = 0.0
+) -> Split:
     """Build a temporal train/test split with course-scoped user candidate sets.
 
     Aggregates clicks per (id_student, id_site) within train/test windows.
     Cutoff is the chronological quantile of `date` such that approximately
     `test_fraction` of interactions fall in the test window.
 
-    The candidate set for each user is derived from `vle` filtered to the
-    presentations that user appears in (per `studentRegistration`).
+    Parameters
+    ----------
+    decay_rate: exponential recency-weighting rate applied to the *training*
+        interaction matrix. Each click contributes
+        ``sum_click * exp(-decay_rate * (cutoff - click_date))`` to its
+        (student, item) cell, so more recent clicks receive weight closer
+        to 1 and older clicks decay towards 0. decay_rate = 0 (default)
+        reproduces the raw-click behaviour used in the prelim report;
+        larger values compress the effective training window. The test
+        matrix is *not* decayed — the label is a binary "did this user
+        click item i in the future window?" regardless of magnitude.
     """
     if not 0 < test_fraction < 1:
         raise ValueError("test_fraction must be in (0, 1)")
+    if decay_rate < 0:
+        raise ValueError("decay_rate must be non-negative")
 
     vle_interactions = data.student_vle[
         ["id_student", "id_site", "date", "sum_click"]
@@ -100,11 +113,19 @@ def build_split(data: OULAD, test_fraction: float = 0.2) -> Split:
     s_to_row = pd.Series(np.arange(len(students)), index=students)
     i_to_col = pd.Series(np.arange(len(items)), index=items)
 
-    def _matrix(df: pd.DataFrame) -> sparse.csr_matrix:
-        agg = df.groupby(["id_student", "id_site"], as_index=False)["sum_click"].sum()
+    def _matrix(df: pd.DataFrame, apply_decay: bool) -> sparse.csr_matrix:
+        if apply_decay and decay_rate > 0:
+            weights = df["sum_click"].to_numpy(dtype=np.float32) * np.exp(
+                -decay_rate * (cutoff - df["date"].to_numpy(dtype=np.float32))
+            )
+            df = df.assign(_weight=weights)
+            agg = df.groupby(["id_student", "id_site"], as_index=False)["_weight"].sum()
+            vals = agg["_weight"].to_numpy(dtype=np.float32)
+        else:
+            agg = df.groupby(["id_student", "id_site"], as_index=False)["sum_click"].sum()
+            vals = agg["sum_click"].to_numpy(dtype=np.float32)
         rows = s_to_row.loc[agg["id_student"]].to_numpy()
         cols = i_to_col.loc[agg["id_site"]].to_numpy()
-        vals = agg["sum_click"].to_numpy(dtype=np.float32)
         return sparse.coo_matrix(
             (vals, (rows, cols)), shape=(len(students), len(items))
         ).tocsr()
@@ -115,8 +136,8 @@ def build_split(data: OULAD, test_fraction: float = 0.2) -> Split:
     user_candidates = _build_user_candidates(data, students, items, i_to_col)
 
     return Split(
-        train=_matrix(train_df),
-        test=_matrix(test_df),
+        train=_matrix(train_df, apply_decay=True),
+        test=_matrix(test_df, apply_decay=False),
         student_index=students,
         item_index=items,
         cutoff_date=cutoff,
