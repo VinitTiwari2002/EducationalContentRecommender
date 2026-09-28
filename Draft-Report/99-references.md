@@ -2,11 +2,15 @@
 
 1. Bousbahi, F. and Chorfi, H., 2015. MOOC-Rec: A case based recommender system for MOOCs. *Procedia — Social and Behavioral Sciences*, 195, pp.1813–1822.
 
-2. Burke, R., 2002. Hybrid recommender systems: Survey and experiments. *User Modeling and User-Adapted Interaction*, 12(4), pp.331–370.
+2. Burges, C.J.C., 2010. From RankNet to LambdaRank to LambdaMART: An overview. *Microsoft Research Technical Report* MSR-TR-2010-82.
+
+3. Burke, R., 2002. Hybrid recommender systems: Survey and experiments. *User Modeling and User-Adapted Interaction*, 12(4), pp.331–370.
 
 3. Corbett, A.T. and Anderson, J.R., 1995. Knowledge tracing: Modeling the acquisition of procedural knowledge. *User Modeling and User-Adapted Interaction*, 4(4), pp.253–278.
 
 4. Drachsler, H., Verbert, K., Santos, O.C. and Manouselis, N., 2015. Panorama of recommender systems to support learning. In: F. Ricci, L. Rokach and B. Shapira (eds.), *Recommender Systems Handbook*, 2nd edn., pp.421–451. Springer, New York.
+
+5. Ekstrand, M.D., Tian, M., Kazi, M.R.I., Mehrpouyan, H. and Kluver, D., 2018. Exploring author gender in book rating and recommendation. *Proceedings of the 12th ACM Conference on Recommender Systems (RecSys)*, pp.242–250.
 
 5. Hlosta, M., Zdrahal, Z. and Zendulka, J., 2017. Ouroboros: Early identification of at-risk students without models based on legacy data. *Proceedings of the Seventh International Learning Analytics & Knowledge Conference (LAK '17)*, pp.6–15.
 
@@ -31,3 +35,5 @@
 15. Wilson, K.H., Karklin, Y., Han, B. and Ekanadham, C., 2016. Back to the basics: Bayesian extensions of IRT outperform neural networks for proficiency estimation. *Proceedings of the 9th International Conference on Educational Data Mining*, pp.539–544. arXiv:1604.02336.
 
 16. Zawacki-Richter, O., Marín, V.I., Bond, M. and Gouverneur, F., 2019. Systematic review of research on artificial intelligence applications in higher education — where are the educators? *International Journal of Educational Technology in Higher Education*, 16(1), Article 39, pp.1–27.
+
+17. Zehlike, M., Yang, K. and Stoyanovich, J., 2022. Fairness in ranking, Part I: Score-based ranking. *ACM Computing Surveys*, 55(6), Article 118, pp.1–36.
