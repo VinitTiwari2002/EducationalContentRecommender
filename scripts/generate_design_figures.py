@@ -4,14 +4,15 @@ Run:
     .venv/bin/python scripts/generate_design_figures.py
 
 Output:
-    Preliminary-Report/figures/fig_3_1_pipeline.png
-    Preliminary-Report/figures/fig_3_2_recommendation_example.png
-    Preliminary-Report/figures/fig_3_3_score_decomposition.png
+    Draft-Report/figures/fig_3_1_pipeline.png
+    Draft-Report/figures/fig_3_2_recommendation_example.png
+    Draft-Report/figures/fig_3_3_score_decomposition.png
 
-Pulls a real OULAD student for figure 2 to ground the worked example in actual
-data. Figure 3 illustrates the hybrid score decomposition using realistic but
-illustrative numbers (the hybrid model isn't built yet — the figure is a design
-schematic, not a results plot).
+Figures 3.2 and 3.3 pull real output from the persisted Hybrid recommender
+(under data/processed/models/, produced by `python -m src.pipeline
+--persist-models`). If those artefacts are missing, the script falls back
+to illustrative numbers and prints a warning — the CI/reproducibility
+smoke test can still run without a full pipeline execution.
 """
 from __future__ import annotations
 
@@ -27,8 +28,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import oulad  # noqa: E402
+from src.hybrid import HybridRecommender  # noqa: E402
+from src.persistence import DEFAULT_MODELS_DIR, artefacts_exist, load_models  # noqa: E402
 
-FIG_DIR = PROJECT_ROOT / "Preliminary-Report" / "figures"
+FIG_DIR = PROJECT_ROOT / "Draft-Report" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -203,12 +206,128 @@ def fig_pipeline() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Shared context for figures 3.2 and 3.3 — loads the persisted Hybrid, picks
+# a real student, and returns their real top-10 output + decomposition.
+# ---------------------------------------------------------------------------
+
+
+def _prepare_hybrid_context() -> dict | None:
+    """Load persisted models + pick a sample student + compute real top-10.
+
+    Returns a dict with `hybrid`, `student_id`, `row`, `profile`, `top_k_cols`,
+    `top_k_item_ids`, `activity_types`, `breakdown`. Returns None if the
+    persisted artefacts are missing — callers fall back to illustrative
+    numbers with a warning.
+    """
+    if not artefacts_exist(DEFAULT_MODELS_DIR):
+        print(
+            f"Warning: no persisted models under {DEFAULT_MODELS_DIR}. "
+            "Falling back to illustrative numbers. Run "
+            "`python -m src.pipeline --persist-models` for real output."
+        )
+        return None
+    models, context, _manifest = load_models(DEFAULT_MODELS_DIR)
+    hybrid = models.get("Hybrid")
+    if not isinstance(hybrid, HybridRecommender):
+        print("Warning: persisted models do not include a Hybrid; falling back.")
+        return None
+
+    print("Loading OULAD for figure context...")
+    data = oulad.load()
+
+    # Pick a student that is (i) in the loaded split, (ii) warm (many
+    # clicks), (iii) has an assessment score to show, and (iv) has enough
+    # candidates that a top-10 is well-defined. Then break ties
+    # deterministically by taking the median from the sorted candidates.
+    student_index = context.student_index
+    counts = data.student_vle.groupby("id_student").size()
+    counts = counts[counts.index.isin(student_index)]
+    row_by_id = {int(s): int(r) for r, s in enumerate(student_index)}
+    candidates_pool_size = np.array(
+        [len(context.user_candidates[row_by_id[int(s)]]) for s in counts.index]
+    )
+    keep = (counts.to_numpy() >= 80) & (counts.to_numpy() <= 200) & (candidates_pool_size >= 20)
+    keep_ids = counts.index[keep].tolist()
+    if not keep_ids:
+        keep_ids = counts.index.tolist()
+    keep_ids = sorted(keep_ids)
+    student_id = int(keep_ids[len(keep_ids) // 2])
+    row = row_by_id[student_id]
+
+    info = data.student_info[data.student_info["id_student"] == student_id].iloc[0]
+    sa = data.student_assessment[data.student_assessment["id_student"] == student_id]
+    svle = data.student_vle[data.student_vle["id_student"] == student_id]
+    activity_types = (
+        svle.merge(data.vle[["id_site", "activity_type"]], on="id_site")["activity_type"]
+        .value_counts()
+        .head(5)
+    )
+    profile = {
+        "gender": info["gender"],
+        "imd_band": info["imd_band"],
+        "age_band": info["age_band"],
+        "presentation": f"{info['code_module']}_{info['code_presentation']}",
+        "n_interactions": int(len(svle)),
+        "n_unique_items": int(svle["id_site"].nunique()),
+        "mean_assessment_score": float(sa["score"].mean()) if len(sa) else float("nan"),
+        "n_assessments": int(len(sa)),
+        "top_activity_types": activity_types.to_dict(),
+    }
+
+    # Real top-10 from Hybrid, restricted to the student's course scope.
+    candidates = context.user_candidates[row]
+    top_k_cols = hybrid.recommend(row, k=10, candidates=candidates)
+    top_k_cols_arr = np.asarray(top_k_cols, dtype=np.int64)
+    top_k_item_ids = context.item_index[top_k_cols_arr]
+
+    # Look up each recommended item's activity_type.
+    vle_lookup = data.vle.drop_duplicates(subset=["id_site"]).set_index("id_site")["activity_type"]
+    top_k_activity_types = [
+        str(vle_lookup.get(int(iid), "unknown")) for iid in top_k_item_ids
+    ]
+
+    # Score breakdown over the candidate pool, filtered to the top-10 items
+    # (matches what /recommend and Table 5.1 report).
+    bd = hybrid.score_breakdown(user_row=row, items=np.asarray(candidates))
+    order = [int(np.where(bd["items"] == c)[0][0]) for c in top_k_cols_arr]
+    breakdown = {
+        "cf": bd["cf_weighted"][order],
+        "content": bd["content_weighted"][order],
+        "outcome": bd["outcome_weighted"][order],
+        "total": bd["total"][order],
+    }
+
+    return {
+        "hybrid": hybrid,
+        "student_id": student_id,
+        "row": row,
+        "profile": profile,
+        "top_k_cols": top_k_cols_arr,
+        "top_k_item_ids": top_k_item_ids.astype(int),
+        "top_k_activity_types": top_k_activity_types,
+        "breakdown": breakdown,
+        "hybrid_weights": (hybrid.alpha, hybrid.beta, hybrid.gamma),
+    }
+
+
+# Cached across figure 3.2 and 3.3 calls (see __main__).
+_HYBRID_CONTEXT: dict | None = None
+
+
+def _get_or_build_context() -> dict | None:
+    global _HYBRID_CONTEXT
+    if _HYBRID_CONTEXT is None:
+        _HYBRID_CONTEXT = _prepare_hybrid_context()
+    return _HYBRID_CONTEXT
+
+
+# ---------------------------------------------------------------------------
 # Figure 3.2 — Recommendation example for a real OULAD student
 # ---------------------------------------------------------------------------
 
 
 def _pick_student(data) -> tuple[int, dict]:
-    """Pick a student with a substantial interaction history for the example."""
+    """Illustrative fallback when persisted models are unavailable."""
     counts = data.student_vle.groupby("id_student").size()
     candidates = counts[(counts > 80) & (counts < 200)].index
     student_id = int(candidates[len(candidates) // 2])
@@ -221,7 +340,6 @@ def _pick_student(data) -> tuple[int, dict]:
         .value_counts()
         .head(5)
     )
-
     profile = {
         "gender": info["gender"],
         "imd_band": info["imd_band"],
@@ -237,9 +355,20 @@ def _pick_student(data) -> tuple[int, dict]:
 
 
 def fig_recommendation_example() -> None:
-    print("Loading OULAD for figure 2...")
-    data = oulad.load()
-    student_id, p = _pick_student(data)
+    ctx = _get_or_build_context()
+    if ctx is not None:
+        student_id = ctx["student_id"]
+        p = ctx["profile"]
+        real_items = list(zip(
+            ctx["top_k_item_ids"].tolist(),
+            ctx["top_k_activity_types"],
+            ctx["breakdown"]["total"].tolist(),
+        ))
+    else:
+        print("Loading OULAD for figure 2 (fallback path)...")
+        data = oulad.load()
+        student_id, p = _pick_student(data)
+        real_items = None
 
     fig = plt.figure(figsize=(17, 8.5))
     gs = fig.add_gridspec(1, 4, width_ratios=[1.0, 1.1, 1.0, 1.4], wspace=0.75,
@@ -315,16 +444,20 @@ def fig_recommendation_example() -> None:
     # Panel 4: Top-10 ranked output rendered as a clean table
     ax4 = fig.add_subplot(gs[0, 3])
     ax4.axis("off")
-    ax4.set_title(
-        "(4) Top-10 ranked output\n(illustrative — hybrid not yet built)",
-        fontsize=11.5, weight="bold", loc="left", pad=10,
-    )
-    rng = np.random.default_rng(seed=student_id)
-    item_labels = [f"item_{int(rng.integers(1000, 9000))}" for _ in range(10)]
-    scores = sorted(rng.uniform(0.45, 0.92, 10), reverse=True)
-    activities = rng.choice(
-        ["resource", "oucontent", "subpage", "url", "quiz", "forumng"], 10
-    )
+    if real_items is not None:
+        panel4_title = "(4) Top-10 ranked output\nfrom the fitted Hybrid recommender"
+        item_labels = [f"item_{iid}" for iid, _, _ in real_items]
+        activities = [act for _, act, _ in real_items]
+        scores = np.array([total for _, _, total in real_items], dtype=float)
+    else:
+        panel4_title = "(4) Top-10 ranked output\n(illustrative — hybrid not yet trained)"
+        rng = np.random.default_rng(seed=student_id)
+        item_labels = [f"item_{int(rng.integers(1000, 9000))}" for _ in range(10)]
+        scores = np.array(sorted(rng.uniform(0.45, 0.92, 10), reverse=True))
+        activities = rng.choice(
+            ["resource", "oucontent", "subpage", "url", "quiz", "forumng"], 10
+        ).tolist()
+    ax4.set_title(panel4_title, fontsize=11.5, weight="bold", loc="left", pad=10)
 
     # Table header
     header_y = 0.92
@@ -334,18 +467,22 @@ def fig_recommendation_example() -> None:
     ax4.text(0.70, header_y, "Score", fontsize=10, weight="bold")
     ax4.axhline(y=header_y - 0.025, xmin=0, xmax=1, color="#888", lw=0.8)
 
-    # Rows
+    # Rows. Normalise bar widths against the observed max so the visual
+    # scale is comparable to the illustrative version — real hybrid totals
+    # occupy [0, ~1] under the min-max design.
     row_h = 0.082
+    score_max = float(scores.max()) if len(scores) else 1.0
     for i, (lbl, scr, act) in enumerate(zip(item_labels, scores, activities)):
         y = header_y - 0.05 - i * row_h
         ax4.text(0.00, y, f"#{i+1}", fontsize=9.7, family="monospace")
         ax4.text(0.13, y, lbl, fontsize=9.7, family="monospace")
         ax4.text(0.43, y, act, fontsize=9.7, family="monospace")
-        # Bar + numeric score
         bar_x = 0.70
-        bar_w = 0.20 * scr
-        ax4.add_patch(plt.Rectangle((bar_x, y - 0.012), bar_w, 0.022,
-                                     facecolor="#FF6F00", alpha=0.85))
+        bar_w = 0.20 * (scr / score_max if score_max > 0 else 0)
+        ax4.add_patch(plt.Rectangle(
+            (bar_x, y - 0.012), bar_w, 0.022,
+            facecolor="#FF6F00", alpha=0.85,
+        ))
         ax4.text(bar_x + 0.21, y, f"{scr:.2f}", fontsize=9.5, family="monospace")
 
     # Inter-panel arrows. Routed along the top of the panels (just below the
@@ -390,23 +527,43 @@ def fig_recommendation_example() -> None:
 
 
 def fig_score_decomposition() -> None:
-    rng = np.random.default_rng(seed=11391)
-
-    # 6 candidate items; each gets a (CF, content, outcome) contribution
-    items = [f"item_{int(rng.integers(1000, 9000))}" for _ in range(6)]
-    activity_types = ["resource", "oucontent", "subpage", "quiz", "forumng", "url"]
-    cf = rng.uniform(0.20, 0.55, 6)
-    content = rng.uniform(0.10, 0.40, 6)
-    outcome = rng.uniform(0.05, 0.30, 6)
-    totals = cf + content + outcome
-    order = np.argsort(-totals)
-    items = [items[i] for i in order]
-    activity_types = [activity_types[i] for i in order]
-    cf = cf[order]
-    content = content[order]
-    outcome = outcome[order]
-    totals = totals[order]
-    ranks = np.arange(1, len(items) + 1)
+    ctx = _get_or_build_context()
+    if ctx is not None:
+        # Use the top-6 of the real recommendation list; the full top-10 is
+        # too crowded to render legibly at 12 x 6.5 inches.
+        n_show = min(6, len(ctx["top_k_item_ids"]))
+        items = [f"item_{int(iid)}" for iid in ctx["top_k_item_ids"][:n_show]]
+        activity_types = ctx["top_k_activity_types"][:n_show]
+        cf = np.asarray(ctx["breakdown"]["cf"][:n_show], dtype=float)
+        content = np.asarray(ctx["breakdown"]["content"][:n_show], dtype=float)
+        outcome = np.asarray(ctx["breakdown"]["outcome"][:n_show], dtype=float)
+        totals = cf + content + outcome
+        # Items are already in rank order from the recommender.
+        ranks = np.arange(1, n_show + 1)
+        title_suffix = (
+            f" for student {ctx['student_id']}\n"
+            f"(weights α={ctx['hybrid_weights'][0]}, "
+            f"β={ctx['hybrid_weights'][1]}, "
+            f"γ={ctx['hybrid_weights'][2]}; "
+            "top-6 of the real top-10)"
+        )
+    else:
+        rng = np.random.default_rng(seed=11391)
+        items = [f"item_{int(rng.integers(1000, 9000))}" for _ in range(6)]
+        activity_types = ["resource", "oucontent", "subpage", "quiz", "forumng", "url"]
+        cf = rng.uniform(0.20, 0.55, 6)
+        content = rng.uniform(0.10, 0.40, 6)
+        outcome = rng.uniform(0.05, 0.30, 6)
+        totals = cf + content + outcome
+        order = np.argsort(-totals)
+        items = [items[i] for i in order]
+        activity_types = [activity_types[i] for i in order]
+        cf = cf[order]
+        content = content[order]
+        outcome = outcome[order]
+        totals = totals[order]
+        ranks = np.arange(1, len(items) + 1)
+        title_suffix = "\n(illustrative; final weights tuned on validation fold)"
 
     fig, ax = plt.subplots(figsize=(12, 6.5))
     y = np.arange(len(items))[::-1]
@@ -431,8 +588,7 @@ def fig_score_decomposition() -> None:
     ax.set_xlabel("Score contribution")
     ax.set_xlim(0, max(totals) * 1.30)
     ax.set_title(
-        "Figure 3.3 — Hybrid score decomposition for top-6 candidates\n"
-        "(illustrative; final weights tuned on validation fold)",
+        "Figure 3.3 — Hybrid score decomposition for top-6 candidates" + title_suffix,
         fontsize=12.5,
         weight="bold",
         loc="left",
