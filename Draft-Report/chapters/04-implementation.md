@@ -89,6 +89,16 @@ The four changes below are not isolated defects; they form an iteration narrativ
 
 **Gated hybrid was introduced after the cold-start analysis.** Splitting users into warm (≥10 training clicks) and cold cohorts revealed that Popularity outperforms every personalised model on cold users. A Burke-switching hybrid (Burke, 2002) — Popularity for cold, tuned Hybrid for warm — recovers the cold-user regime without hurting warm performance and is now the default deployed recommender in the pipeline.
 
+## Two-Stage Reranking with LambdaMART
+
+I also implemented a **LambdaMART two-stage reranker** (Burges et al., 2010), the industry-standard learning-to-rank layer used by Bing, YouTube, Amazon, and LinkedIn. Stage 1 (retrieval) uses the tuned GatedHybrid to fetch top-N candidates; Stage 2 (rerank) uses a LightGBM `LGBMRanker` with `objective='lambdarank'` to reorder them by directly optimising NDCG.
+
+**Features** (`src/reranker_features.py`) — 35 per (user, item) pair: 3 Stage-1 signals (min-max normalised CF, content, outcome), 25 item features (reusing `ItemFeatures.matrix`), and 7 user features (gender one-hot, IMD/age ordinal, disability, log-clicks, mean past assessment). All train-only.
+
+**Training** (`scripts/train_reranker.py`) uses an honest three-window design: Stage 1 refit on `tune_train`, positive labels from the later `tune_val`, evaluation on `split.test`. Because features are min-max normalised within each user's candidate pool, the trained booster transfers unchanged when Stage 1 is swapped for the persisted full-train Hybrid at inference.
+
+**Result**: the reranker underperforms the linear hybrid on precision/NDCG — a real empirical finding, discussed in the evaluation chapter (§5.11). Implementation is unit-tested; the trained booster is persisted alongside the other model artefacts.
+
 ## Evaluation Harness Internals
 
 `metrics.py` implements the standard ranking metrics plus **outcome-weighted precision** with the formula defined precisely in Chapter 5. The implementation caches the training-only outcome baseline $\bar{o}$ once per `evaluate()` call so the per-user loop is O(K), not O(n_items). A parallel `per_user_metrics` function returns the four unaggregated per-user metric arrays used by bootstrap CIs and paired-*t* tests.
@@ -114,7 +124,11 @@ Every recommender takes a `random_state` and every metric is deterministic. The 
 --cold-start-threshold N Threshold for warm/cold split (default 10)
 --hybrid-grid-step S     Simplex step for hybrid weights (default 0.2)
 --decay-rate R           Time-decay rate on training clicks (default 0.0)
+--persist-models         Save fitted recommenders + serving context to
+                         data/processed/models/ for the FastAPI service.
 ```
+
+The LambdaMART reranker is trained via a separate script: `python scripts/train_reranker.py` produces `evaluation/reranker_results.csv`, `evaluation/reranker_importance.csv`, and persists the booster to `data/processed/models/reranker.joblib`.
 
 The pipeline writes 11 CSV files to `evaluation/`, each one directly citable from Chapter 5: `baseline_results`, `metrics_with_ci`, `popularity_bias`, `fairness_audit`, `hybrid_ablation`, `paired_t_tests` (with the Bonferroni column), `cold_start_results`, `tuning_svd`, `tuning_als`, `tuning_hybrid`, and `cv_results`. Chapter 5 reads directly from these artefacts.
 

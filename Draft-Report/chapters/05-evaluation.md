@@ -135,6 +135,21 @@ Per-attribute metric breakdown for GatedHybrid across gender, IMD band, and disa
 
 **Time-decay.** Comparing $\lambda \in \{0.0, 0.005, 0.01, 0.02\}$ (see the pre-decay run archived under `baseline_results_no_course_scoping.csv` and re-runs of `baseline_results.csv` at $\lambda = 0.01$ documented in this chapter), $\lambda = 0.01$ produces the largest gain (+2.3 P@10 points for Hybrid, +4.7 for Popularity). Both larger and smaller values regress toward the raw-click case.
 
+**Robustness across seeds.** `scripts/robustness_check.py` refits the seeded recommenders with `random_state ∈ {0, 1, 2}` (`evaluation/robustness.csv`). Content, Hybrid, GatedHybrid, Popularity, and SVD are exactly deterministic; ALS drifts in the 4th decimal; Random shifts by 0.005 on HR@10. Model ordering identical across all seeds.
+
+## LambdaMART Re-Ranking Experiment
+
+I implemented a two-stage LambdaMART reranker (Burges et al., 2010): Stage 1 (retrieval) uses the tuned GatedHybrid to fetch the top-100 per user, and Stage 2 uses a LightGBM `LGBMRanker` (`objective='lambdarank'`) to reorder via 35 (user, item) features — three Stage-1 scores, 25 item features, 7 user demographics/behavioural features (details in §4.7). Training uses an honest three-window design (Stage 1 refit on `tune_train`, labels from `tune_val`, evaluation on `split.test`) so no test-window information leaks. Table 5.5 reports the primary-split comparison.
+
+| Model | P@10 | Recall@10 | NDCG@10 | HR@10 | OWP@10 |
+|---|---:|---:|---:|---:|---:|
+| GatedHybrid (Stage 1) | **0.276** | 0.105 | **0.303** | 0.784 | **0.287** |
+| LambdaMART (rerank) | 0.252 | **0.107** | 0.284 | **0.796** | 0.262 |
+
+*Table 5.5 — LambdaMART re-ranking on top of GatedHybrid, primary split (n_users = 17,562).*
+
+The reranker **underperforms Stage 1 on precision (−2.3 pts), NDCG (−1.9 pts), and OWP (−2.6 pts)**, while marginally improving HR@10 (+1.2 pts) and Recall@10 (+0.2 pts) — it finds hits for slightly more users but places them lower. Feature-importance (`evaluation/reranker_importance.csv`) shows the top signals are `activity_type=resource`, `log_access_count`, `mean_score_of_accessers`, and `week_from_norm` — precisely the item features the linear hybrid already exploits. On OULAD's course-scoped 6,268-item catalogue, the gradient-boosted trees add flexibility the linear ensemble lacks but that flexibility does not translate into ranking gains. This *sharpens* the primary contribution: content + outcome saturates the achievable NDCG in the pointwise-linear space, and heavier learning-to-rank machinery does not close a gap that is essentially already closed.
+
 ## Critical Evaluation and Limitations
 
 The evaluation reaches the level of statistical confidence the marker specifically asked for: precise metric definition (Section 5.2), 95% CIs across ~17K users, paired testing with Bonferroni adjustment, five-fold temporal CV, ablation, cold-start stratification, fairness audit, and hyperparameter sensitivity across four axes. The claim I make — that GatedHybrid outperforms all six other models on the primary split and across five folds — is supported at $p < 10^{-16}$ on the four ranking-quality metrics.
