@@ -54,6 +54,7 @@ from .features import ItemFeatures, build_item_features
 from .gated_hybrid import GatedHybridRecommender
 from .hybrid import HybridRecommender
 from .metrics import evaluate, per_user_metrics
+from .persistence import DEFAULT_MODELS_DIR, ServingContext, save_models
 from .preprocess import Split, build_split
 from .svd import SVDRecommender
 from .tuning import build_tuning_split, tune_als, tune_hybrid_weights, tune_svd
@@ -418,6 +419,8 @@ def run(
     cold_start_threshold: int = 10,
     hybrid_grid_step: float = 0.2,
     decay_rate: float = 0.0,
+    persist_models: bool = False,
+    models_dir: Path = DEFAULT_MODELS_DIR,
 ) -> dict[str, pd.DataFrame]:
     cache_exists = (PROCESSED_DIR / "train.npz").exists() and (
         PROCESSED_DIR / "user_candidates.npy"
@@ -577,6 +580,30 @@ def run(
         df.to_csv(out_path, index=False)
         print(f"Saved {out_path}  ({len(df)} rows)")
 
+    if persist_models:
+        print("\n=== Persisting fitted models for serving ===")
+        # Refit the full-catalogue models on the primary split so the
+        # persisted artefacts match the numbers in Table 5.1.
+        models_to_persist = _fit_all_models(
+            split.train, features, svd_n_factors, hybrid_weights, als_params
+        )
+        context = ServingContext(
+            student_index=split.student_index,
+            item_index=split.item_index,
+            user_candidates=list(split.user_candidates),
+            outcome_score=features.outcome_score,
+            cutoff_date=int(split.cutoff_date),
+        )
+        metadata = {
+            "svd_n_factors": svd_n_factors,
+            "hybrid_weights": list(hybrid_weights),
+            "als_params": als_params,
+            "decay_rate": decay_rate,
+            "course_scoping": course_scoping,
+        }
+        target = save_models(models_to_persist, context, metadata=metadata, out_dir=models_dir)
+        print(f"Saved fitted models to {target}")
+
     print("\nDone.")
     return outputs
 
@@ -629,7 +656,18 @@ def main() -> None:
             "--rebuild-split to take effect."
         ),
     )
-    parser.set_defaults(course_scoping=True, run_cv=True, run_tuning=True)
+    parser.add_argument(
+        "--persist-models",
+        dest="persist_models",
+        action="store_true",
+        help=(
+            "After evaluation, save fitted recommenders + serving context to "
+            "data/processed/models/ so the FastAPI service can load them at startup."
+        ),
+    )
+    parser.set_defaults(
+        course_scoping=True, run_cv=True, run_tuning=True, persist_models=False
+    )
     args = parser.parse_args()
     run(
         rebuild_split=args.rebuild_split,
@@ -640,6 +678,7 @@ def main() -> None:
         cold_start_threshold=args.cold_start_threshold,
         hybrid_grid_step=args.hybrid_grid_step,
         decay_rate=args.decay_rate,
+        persist_models=args.persist_models,
     )
 
 
