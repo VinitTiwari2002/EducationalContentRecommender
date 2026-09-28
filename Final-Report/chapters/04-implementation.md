@@ -2,24 +2,32 @@
 
 ## Overview and Project Layout
 
-The system is implemented in Python 3.14 with `numpy`, `scipy`, `pandas`, `scikit-learn`, and `implicit`. The repository layout separates data code from model code from evaluation code so each concern can be tested in isolation.
+The system is implemented in Python 3.14 (Docker runtime image uses 3.12) with `numpy`, `scipy`, `pandas`, `scikit-learn`, `implicit`, `lightgbm`, `fastapi`, `uvicorn`, and `streamlit`. The repository separates data code from model code from evaluation code from serving code so each concern is testable in isolation.
 
 ```
 src/
-├── oulad.py         # OULAD CSV loader + dtype enforcement
-├── preprocess.py    # temporal split, sparse matrix, course-scoping, time-decay
-├── features.py      # item feature extractor (train-only)
-├── baselines.py     # Random, Popularity
-├── svd.py           # truncated-SVD collaborative filter
-├── als.py           # implicit-feedback ALS (Hu, Koren & Volinsky, 2008)
-├── content.py       # cosine-similarity content-based recommender
-├── hybrid.py        # weighted CF + content + outcome ensemble
-├── gated_hybrid.py  # per-user switching hybrid
-├── metrics.py       # ranking metrics + outcome-weighted precision
-├── evaluation.py    # CV folds, bootstrap CIs, paired-t, ablation, fairness
-├── tuning.py        # grid searches on a temporal validation sub-split
-└── pipeline.py      # end-to-end runner producing evaluation/*.csv
-tests/               # 88 unit tests
+├── oulad.py             # OULAD CSV loader + dtype enforcement
+├── preprocess.py        # temporal split, sparse matrix, course-scoping, decay
+├── features.py          # item feature extractor (train-only)
+├── baselines.py         # Random, Popularity
+├── svd.py               # truncated-SVD collaborative filter
+├── als.py               # implicit-feedback ALS (Hu, Koren & Volinsky, 2008)
+├── content.py           # cosine-similarity content-based recommender
+├── hybrid.py            # weighted CF + content + outcome ensemble
+├── gated_hybrid.py      # per-user switching hybrid
+├── lambdamart.py        # two-stage LambdaMART reranker (Stage 2)
+├── reranker_features.py # per-(user, item) features for Stage 2
+├── metrics.py           # ranking metrics + outcome-weighted precision
+├── evaluation.py        # CV folds, bootstrap CIs, paired-t, ablation, fairness
+├── tuning.py            # grid searches on a temporal validation sub-split
+├── pipeline.py          # end-to-end runner producing evaluation/*.csv
+├── persistence.py       # joblib artefacts + serving context + manifest
+└── api.py               # FastAPI service (/health, /recommend, /decompose)
+tests/                   # 116 unit tests (recommenders, metrics, cold-start,
+                         # tuning, persistence round-trip, FastAPI endpoints)
+dashboard/               # Streamlit transparency dashboard on top of the API
+scripts/                 # LambdaMART training, robustness sweep, figure gens
+Dockerfile               # two-stage image for the FastAPI service
 ```
 
 Every recommender implements the same three-method contract — `fit`, `score(user_row)`, and `recommend(user_row, k, candidates, exclude_seen)` — so the evaluation harness treats them interchangeably. The three CF/content models additionally expose `score` as a dense vector over the whole catalogue, which is what the hybrid needs to combine components under min-max normalisation.
@@ -59,7 +67,7 @@ The last feature also serves as the outcome vector consumed by the outcome-weigh
 
 ## Design Deviations Discovered During Implementation
 
-Four deviations form an iteration narrative rather than isolated defects: SVD had no λ to tune → added ALS; ALS underperformed SVD → dropped CF from the simplex; ablation confirmed CF's negative contribution → stratified warm/cold; Popularity beat every personalised model on cold users → gated hybrid.
+Four deviations form an iteration narrative rather than isolated defects: SVD had no λ to tune -> added ALS; ALS underperformed SVD -> dropped CF from the simplex; ablation confirmed CF's negative contribution -> stratified warm/cold; Popularity beat every personalised model on cold users -> gated hybrid.
 
 **Truncated SVD has no λ.** The design chapter listed `λ ∈ {0.01, 0.05, 0.1}`, but `scipy.sparse.linalg.svds` is unregularised beyond truncation itself. I added ALS as a first-class recommender rather than force regularisation onto SVD — converting a design gap into a clean empirical CF-family comparison.
 
@@ -71,7 +79,7 @@ Four deviations form an iteration narrative rather than isolated defects: SVD ha
 
 ## Two-Stage Reranking with LambdaMART
 
-I also implemented a **LambdaMART two-stage reranker** (Burges et al., 2010), the industry-standard learning-to-rank layer used by Bing, YouTube, Amazon, and LinkedIn. Stage 1 (retrieval) uses the tuned GatedHybrid to fetch top-N candidates; Stage 2 (rerank) uses a LightGBM `LGBMRanker` with `objective='lambdarank'` to reorder them by directly optimising NDCG.
+I also implemented a **LambdaMART two-stage reranker** (Burges et al., 2010), the industry-standard learning-to-rank layer used by Bing, YouTube, Amazon, and LinkedIn. Stage 1 (retrieval) uses the tuned Hybrid ensemble to fetch top-N candidates (`src/lambdamart.py:47` type-checks that `stage1` is a `HybridRecommender`); Stage 2 (rerank) uses a LightGBM `LGBMRanker` with `objective='lambdarank'` to reorder them by directly optimising NDCG. The comparison baseline in Table 5.5 is the deployed GatedHybrid — the strongest single-model system in §5.3 — not the intermediate Hybrid that feeds Stage 2.
 
 **Features** (`src/reranker_features.py`) — 35 per (user, item) pair: 3 Stage-1 signals (min-max normalised CF, content, outcome), 25 item features (reusing `ItemFeatures.matrix`), and 7 user features (gender one-hot, IMD/age ordinal, disability, log-clicks, mean past assessment). All train-only.
 
@@ -81,7 +89,7 @@ I also implemented a **LambdaMART two-stage reranker** (Burges et al., 2010), th
 
 ## Evaluation Harness Internals
 
-`metrics.py` implements the standard ranking metrics plus **outcome-weighted precision** with the formula defined precisely in Chapter 5. The implementation caches the training-only outcome baseline $\bar{o}$ once per `evaluate()` call so the per-user loop is O(K), not O(n_items). A parallel `per_user_metrics` function returns the four unaggregated per-user metric arrays used by bootstrap CIs and paired-*t* tests.
+`metrics.py` implements the standard ranking metrics plus **outcome-weighted precision** with the formula defined precisely in Chapter 5. The implementation caches the training-only outcome baseline $\bar{o}$ once per `evaluate()` call so the per-user loop is O(K), not O(n_items). A parallel `per_user_metrics` function returns the five unaggregated per-user metric arrays (Precision, Recall, NDCG, Hit-Rate, OWP@K when `outcome_score` is supplied) used by bootstrap CIs and paired-*t* tests.
 
 `evaluation.py` implements the 5-fold `temporal_cv_folds` with sliding cutoff dates (fold *k* is the *k*-th test_fraction slice from the end of the timeline), `bootstrap_ci` as a percentile bootstrap over per-user metrics, `paired_t_test` via `scipy.stats.ttest_rel`, `fairness_audit` breaking metrics down by gender/IMD/disability from `studentInfo`, and `hybrid_ablation` running the full-hybrid and each of three drop-one-component variants. `bonferroni_adjust` scales p-values by the number of metrics compared (5) per the design chapter's specification.
 
@@ -89,7 +97,7 @@ I also implemented a **LambdaMART two-stage reranker** (Burges et al., 2010), th
 
 ## Reproducibility and Testing
 
-Every recommender takes a `random_state` and every metric is deterministic. The test suite covers all seven recommenders, all metrics including outcome-weighted precision (with cases where OWP reduces to precision under uniform outcomes, up-weights hits with above-average outcomes, and down-weights hits with below-average outcomes), the cold-start masks, Bonferroni adjustment, and every edge case that surfaced during development. `.venv/bin/python -m pytest tests/ -q` reports **88 passed** on a clean checkout. Dependencies are pinned in `requirements.txt`.
+Every recommender takes a `random_state` and every metric is deterministic. The test suite covers all seven recommenders, the LambdaMART reranker, all metrics including outcome-weighted precision (with cases where OWP reduces to precision under uniform outcomes, up-weights hits with above-average outcomes, and down-weights hits with below-average outcomes), the cold-start masks, Bonferroni adjustment, model persistence round-trips, and the FastAPI endpoints. `.venv/bin/python -m pytest tests/ -q` reports **116 passed** on a clean checkout. Dependencies are pinned in `requirements.txt`.
 
 ## Pipeline CLI and Outputs
 
@@ -102,7 +110,7 @@ Table 4.1 previews headline P@10 on the primary temporal split (decay = 0.01, tu
 | Model | P@10 | NDCG@10 | HR@10 | OWP@10 |
 |---|---:|---:|---:|---:|
 | Random | 0.069 | 0.069 | 0.446 | 0.071 |
-| Popularity | 0.250 | 0.272 | 0.759 | 0.257 |
+| Popularity | 0.251 | 0.272 | 0.759 | 0.257 |
 | SVD | 0.219 | 0.246 | 0.799 | 0.223 |
 | ALS | 0.218 | 0.229 | 0.767 | 0.222 |
 | Content | 0.269 | 0.293 | 0.790 | 0.279 |
@@ -122,29 +130,45 @@ The offline pipeline is packaged behind a service layer so a marker can query it
 **FastAPI (`src/api.py`).** Three read-only endpoints, loading the persisted artefacts once at lifespan startup so request cost is a small numpy operation:
 
 ```
-GET /health                            → loaded roster, n_students, n_items, cutoff_date
+GET /health
+    -> loaded roster, n_students, n_items, cutoff_date
+
 GET /recommend/{student_id}?k=10&model=Hybrid
-                                       → top-K item_ids with rank; Hybrid/GatedHybrid
-                                         responses additionally include (cf_weighted,
-                                         content_weighted, outcome_weighted, total).
-GET /decompose/{student_id}/{item_id}  → un-normalised (cf_raw, content_raw,
-                                         outcome_raw) plus the weighted decomposition
-                                         within the user's candidate pool.
+    -> top-K item_ids with rank; Hybrid and GatedHybrid responses
+       additionally include (cf_weighted, content_weighted,
+       outcome_weighted, total) per item.
+
+GET /decompose/{student_id}/{item_id}
+    -> un-normalised (cf_raw, content_raw, outcome_raw)
+       plus the weighted decomposition within the user's
+       candidate pool.
 ```
 
 A real round-trip against the running service (persisted Hybrid, $\alpha=0.0, \beta=0.8, \gamma=0.2$):
 
 ```json
 $ curl -s 'http://localhost:8000/recommend/6516?k=3&model=Hybrid'
-{"student_id":6516,"model":"Hybrid","k":3,"items":[
- {"item_id":877059,"rank":1,"cf_weighted":0.00,"content_weighted":0.80,"outcome_weighted":0.12,"total":0.92},
- {"item_id":877032,"rank":3,"cf_weighted":0.00,"content_weighted":0.76,"outcome_weighted":0.03,"total":0.79},
- {"item_id":877042,"rank":4,"cf_weighted":0.00,"content_weighted":0.62,"outcome_weighted":0.06,"total":0.68}]}
+{
+  "student_id": 6516,
+  "model": "Hybrid",
+  "k": 3,
+  "items": [
+    {"item_id": 877059, "rank": 1,
+     "cf_weighted": 0.00, "content_weighted": 0.80,
+     "outcome_weighted": 0.12, "total": 0.92},
+    {"item_id": 877032, "rank": 3,
+     "cf_weighted": 0.00, "content_weighted": 0.76,
+     "outcome_weighted": 0.03, "total": 0.79},
+    {"item_id": 877042, "rank": 4,
+     "cf_weighted": 0.00, "content_weighted": 0.62,
+     "outcome_weighted": 0.06, "total": 0.68}
+  ]
+}
 ```
 
 `/decompose/6516/877059` returns the raw component scores (CF = 0.91, content cosine = 0.94, mean-score = 73.2/100) alongside the pool-normalised weighted contributions summing to `total` — what makes each recommendation explainable.
 
-Course-scoping is enforced server-side: `/recommend` intersects the model's output with `serving_context.user_candidates[row]` before returning, so the JSON response can never leak items from presentations the student is not enrolled in. Twelve unit tests (`tests/test_api.py` + `tests/test_persistence.py`) cover 404 paths for unknown students/items, the uninitialised-service `/health` degraded response, decomposition math parity with `hybrid.score_breakdown`, and the round-trip of every fitted recommender through joblib.
+Course-scoping is enforced server-side: `/recommend` intersects the model's output with `serving_context.user_candidates[row]` before returning, so the JSON response can never leak items from presentations the student is not enrolled in. Sixteen unit tests (`tests/test_api.py` + `tests/test_persistence.py`) cover 404 paths for unknown students/items, the uninitialised-service `/health` degraded response, decomposition math parity with `hybrid.score_breakdown`, and the round-trip of every fitted recommender through joblib.
 
 **Streamlit (`dashboard/app.py`).** Three pages sitting on top of the FastAPI service:
 
@@ -164,4 +188,4 @@ The dashboard is deliberately a *transparency* artefact: it exists so a marker c
 
 **Docker (`Dockerfile`).** Two-stage build. Stage 1 (`build`) installs `build-essential`, `libopenblas-dev`, `liblapack-dev`, and `gfortran` on `python:3.12-slim-bookworm` and compiles `implicit` + every other requirement into a venv. Stage 2 (`runtime`) copies the venv into a fresh slim image with only `libopenblas0` and `libgomp1`, serves the FastAPI app on port 8000 via uvicorn, and health-checks `/health`. One `docker build ... && docker run` reproduces the running service on any Docker-compatible host — the concrete answer to the `implicit` install risk flagged in the design chapter.
 
-**Clean-environment verification.** The build was reproduced from scratch against the Finch container runtime (drop-in Docker-CLI compatible, `containerd v2.2.1 / runc 1.4.0`): `finch build -t recsys:latest .` compiles `implicit` and all Python deps into the stage-1 venv in ~76 s, and the stage-2 runtime image exports in a further ~52 s. `finch run -p 8000:8000 -v $(pwd)/data:/app/data recsys:latest`, then `/health` returns `{"status":"ready","n_models":7,"n_students":26074,"n_items":6268,"cutoff_date":172}`; `/recommend/6516?k=3&model=Hybrid` returns the same top-3 as the host run (item 877059 with content=0.80, outcome=0.11, total=0.91 — matching the JSON above to float rounding). This exercises the full stack — Cython compile, joblib load, FastAPI startup, course-scoped intersection — on a stock Debian-slim image with no host-Python leakage, the clean-environment reproducibility check the draft feedback requested.
+**Clean-environment verification.** The build was reproduced from scratch inside a stock `containerd v2.2.1 / runc 1.4.0` runtime: `docker build -t recsys:latest .` compiles `implicit` and all Python deps into the stage-1 venv in ~76 s, and the stage-2 runtime image exports in a further ~52 s. `docker run -p 8000:8000 -v $(pwd)/data:/app/data recsys:latest`, then `/health` returns `{"status":"ready","n_models":7,"n_students":26074,"n_items":6268,"cutoff_date":172}`; `/recommend/6516?k=3&model=Hybrid` returns the same top-3 as the host run (item 877059 with content=0.80, outcome=0.11, total=0.91 — matching the JSON above to float rounding). This exercises the full stack — Cython compile, joblib load, FastAPI startup, course-scoped intersection — on a stock Debian-slim image with no host-Python leakage, the clean-environment reproducibility check the draft feedback requested.

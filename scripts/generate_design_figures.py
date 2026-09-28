@@ -74,26 +74,33 @@ def _arrow(ax, x0, y0, x1, y1, color="#37474F"):
 
 
 def fig_pipeline() -> None:
-    """Pipeline architecture: descriptive blocks, no code paths.
+    """Pipeline + serving architecture, as delivered.
 
-    Layout strategy:
-      - 5 columns of width 3.2 across an x-range of [0, 17] with 0.4 gutters.
-      - 4 rows: (1) raw input + preprocessing chain, (2) persisted artefact,
-        (3) models, (4) evaluation harness. Each row sized to comfortably
-        fit two lines of descriptive text per block.
+    Layout: (1) preprocessing chain, (2) persisted split, (3) two rows of
+    recommenders (baselines + CF, then content/hybrid/gated + LambdaMART
+    Stage 2), (4) evaluation harness, (5) persisted model artefacts,
+    (6) service layer (FastAPI + Streamlit) inside a Docker wrapper.
     """
-    fig, ax = plt.subplots(figsize=(15, 9))
+    fig, ax = plt.subplots(figsize=(15, 12))
     ax.set_xlim(0, 17)
-    ax.set_ylim(-1.0, 9.0)
+    ax.set_ylim(-0.8, 13.5)
     ax.axis("off")
 
     BOX_W = 3.0
     GAP = 0.4
-    COL_X = [0.2 + i * (BOX_W + GAP) for i in range(5)]  # 0.2, 3.6, 7.0, 10.4, 13.8
+    COL_X5 = [0.2 + i * (BOX_W + GAP) for i in range(5)]  # 5-col grid
+    FULL_X = COL_X5[0]
+    FULL_W = (COL_X5[4] + BOX_W) - FULL_X
 
-    # --- Row 1: input + preprocessing chain ---------------------------------
-    row1_y = 7.0
-    row1_h = 1.2
+    # 4-col grid for the recommender rows, centred under the 5-col header
+    BOX_W4 = 3.5
+    GAP4 = 0.5
+    total4 = 4 * BOX_W4 + 3 * GAP4
+    COL_X4 = [FULL_X + (FULL_W - total4) / 2 + i * (BOX_W4 + GAP4) for i in range(4)]
+
+    # --- Row 1: preprocessing chain ----------------------------------------
+    row1_y = 11.4
+    row1_h = 1.1
     row1_blocks = [
         ("Learner interaction\nand assessment data", "#FFF3E0", "#E65100"),
         ("Ingest and validate\nseven source tables", "#E3F2FD", "#1565C0"),
@@ -101,98 +108,158 @@ def fig_pipeline() -> None:
         ("Split chronologically\ninto train and test", "#E3F2FD", "#1565C0"),
         ("Restrict candidates\nto enrolled courses", "#E3F2FD", "#1565C0"),
     ]
-    for (label, fc, ec), x in zip(row1_blocks, COL_X):
+    for (label, fc, ec), x in zip(row1_blocks, COL_X5):
         _box(ax, x, row1_y, BOX_W, row1_h, label, fc=fc, ec=ec, fontsize=10)
-
     for i in range(4):
-        x_end = COL_X[i] + BOX_W
-        x_start = COL_X[i + 1]
-        _arrow(ax, x_end, row1_y + row1_h / 2, x_start, row1_y + row1_h / 2)
+        _arrow(ax, COL_X5[i] + BOX_W, row1_y + row1_h / 2,
+               COL_X5[i + 1], row1_y + row1_h / 2)
 
-    # --- Row 2: persisted artefact (spans all 5 columns) -------------------
-    row2_y = 4.8
-    row2_h = 1.0
-    row2_x = COL_X[0]
-    row2_w = (COL_X[4] + BOX_W) - row2_x
-    _box(
-        ax,
-        row2_x,
-        row2_y,
-        row2_w,
-        row2_h,
-        "Cached training and test matrices, candidate pools, and split metadata",
-        fc="#F1F8E9",
-        ec="#33691E",
-        fontsize=11,
-    )
-    # Down-arrow from Row 1 (centre) to Row 2 (top)
-    centre_x = (row2_x + row2_w / 2)
+    # --- Row 2: persisted split artefact -----------------------------------
+    row2_y = 10.0
+    row2_h = 0.8
+    _box(ax, FULL_X, row2_y, FULL_W, row2_h,
+         "Persisted split: train/test matrices, per-user course-scoped candidates, "
+         "outcome vector, cutoff date",
+         fc="#F1F8E9", ec="#33691E", fontsize=10.5)
+    centre_x = FULL_X + FULL_W / 2
     _arrow(ax, centre_x, row1_y, centre_x, row2_y + row2_h)
 
-    # --- Row 3: models ------------------------------------------------------
-    row3_y = 2.4
-    row3_h = 1.4
-    row3_blocks = [
-        ("Random recommender", "#FFEBEE", "#B71C1C"),
-        ("Popularity recommender", "#FFEBEE", "#B71C1C"),
-        ("Collaborative filtering\nby matrix factorisation",
-         "#E8EAF6", "#283593"),
-        ("Content-based\nfeature similarity", "#E8EAF6", "#283593"),
-        ("Hybrid ensemble with\noutcome weighting",
-         "#FFF8E1", "#FF6F00"),
-    ]
-    for (label, fc, ec), x in zip(row3_blocks, COL_X):
-        _box(ax, x, row3_y, BOX_W, row3_h, label, fc=fc, ec=ec, fontsize=10)
+    # --- Rows 3+4: recommender bank ----------------------------------------
+    # Layout: two internal rows of four boxes, wrapped in a "Recommender bank"
+    # frame so only two arrows cross the row boundary (split -> bank -> eval).
+    row3_y = 8.0
+    row3_h = 1.3
+    row4_y = 6.2
+    row4_h = 1.3
 
-    # Down-arrows: persisted artefact -> each model (all 5 now connected)
-    for x in COL_X:
-        col_centre = x + BOX_W / 2
-        _arrow(ax, col_centre, row2_y, col_centre, row3_y + row3_h)
-
-    # --- Row 4: evaluation harness (spans all 5 columns) -------------------
-    row4_y = 0.4
-    row4_h = 1.0
-    _box(
-        ax,
-        row2_x,
-        row4_y,
-        row2_w,
-        row4_h,
-        "Common evaluation harness reporting Precision, Recall, NDCG, and Hit Rate at K",
-        fc="#F3E5F5",
-        ec="#6A1B9A",
-        fontsize=11,
+    bank_pad = 0.35
+    bank_x = min(COL_X4) - bank_pad
+    bank_w = (max(COL_X4) + BOX_W4) - bank_x + bank_pad
+    bank_bottom = row4_y - bank_pad
+    bank_top = row3_y + row3_h + bank_pad
+    bank_frame = FancyBboxPatch(
+        (bank_x, bank_bottom),
+        bank_w,
+        bank_top - bank_bottom,
+        boxstyle="round,pad=0.08",
+        linewidth=1.2,
+        edgecolor="#78909C",
+        facecolor="#FAFAFA",
     )
-    # Up-into-harness arrows from each model
-    for x in COL_X:
-        col_centre = x + BOX_W / 2
-        _arrow(ax, col_centre, row3_y, col_centre, row4_y + row4_h)
+    ax.add_patch(bank_frame)
+    ax.text(bank_x + 0.1, bank_top - 0.05,
+            "Recommender bank (each model fitted on train, scored on test)",
+            fontsize=9.5, weight="bold", color="#455A64", va="top")
+
+    row3_blocks = [
+        ("Random\nrecommender", "#FFEBEE", "#B71C1C"),
+        ("Popularity\nrecommender", "#FFEBEE", "#B71C1C"),
+        ("SVD collaborative\nfiltering", "#E8EAF6", "#283593"),
+        ("ALS implicit-feedback\ncollaborative filtering", "#E8EAF6", "#283593"),
+    ]
+    for (label, fc, ec), x in zip(row3_blocks, COL_X4):
+        _box(ax, x, row3_y, BOX_W4, row3_h, label, fc=fc, ec=ec, fontsize=10)
+
+    row4_blocks = [
+        ("Content-based\nfeature similarity", "#E8EAF6", "#283593"),
+        ("Weighted Hybrid\n(CF + content + outcome)", "#FFF8E1", "#FF6F00"),
+        ("Gated Hybrid\n(cold/warm switching)", "#FFF8E1", "#FF6F00"),
+        ("LambdaMART two-stage\nreranker (Stage 2)", "#EDE7F6", "#4527A0"),
+    ]
+    for (label, fc, ec), x in zip(row4_blocks, COL_X4):
+        _box(ax, x, row4_y, BOX_W4, row4_h, label, fc=fc, ec=ec, fontsize=10)
+
+    # Dashed intra-bank arrow: Gated Hybrid -> LambdaMART (Stage-1 → Stage-2)
+    gc = COL_X4[2] + BOX_W4
+    lc = COL_X4[3]
+    ax.annotate("", xy=(lc, row4_y + row4_h / 2),
+                xytext=(gc, row4_y + row4_h / 2),
+                arrowprops=dict(arrowstyle="-|>", color="#4527A0",
+                                lw=1.4, mutation_scale=14, ls="dashed"))
+    ax.text((gc + lc) / 2, row4_y + row4_h / 2 + 0.25,
+            "Stage 1\n→ Stage 2",
+            ha="center", va="bottom", fontsize=8, color="#4527A0", style="italic")
+
+    # Single arrow: persisted split -> bank
+    _arrow(ax, centre_x, row2_y, centre_x, bank_top)
+
+    # --- Row 5: evaluation harness -----------------------------------------
+    row5_y = 4.5
+    row5_h = 1.1
+    _box(ax, FULL_X, row5_y, FULL_W, row5_h,
+         "Evaluation harness: Precision/Recall/NDCG/Hit-Rate/OWP@K, coverage + Gini, "
+         "bootstrap CIs,\npaired-t with Bonferroni, 5-fold temporal CV, ablation, "
+         "cold-start, fairness, robustness",
+         fc="#F3E5F5", ec="#6A1B9A", fontsize=10.5)
+    # Single arrow: bank -> evaluation harness
+    _arrow(ax, centre_x, bank_bottom, centre_x, row5_y + row5_h)
+
+    # --- Row 6: persisted model artefacts ----------------------------------
+    row6_y = 3.0
+    row6_h = 0.8
+    _box(ax, FULL_X, row6_y, FULL_W, row6_h,
+         "Persisted models: models.joblib · serving_context.joblib · "
+         "manifest.json · reranker.joblib",
+         fc="#F1F8E9", ec="#33691E", fontsize=10.5)
+    _arrow(ax, centre_x, row5_y, centre_x, row6_y + row6_h)
+
+    # --- Row 7: service layer (FastAPI + Streamlit) inside a Docker wrapper -
+    row7_y = 0.4
+    row7_h = 1.7
+    # Docker wrapper (spanning both service boxes)
+    docker_pad = 0.25
+    docker_box = FancyBboxPatch(
+        (FULL_X - docker_pad, row7_y - docker_pad),
+        FULL_W + 2 * docker_pad, row7_h + 2 * docker_pad,
+        boxstyle="round,pad=0.06",
+        linewidth=1.5, edgecolor="#0277BD",
+        facecolor="#E1F5FE", alpha=0.35,
+    )
+    ax.add_patch(docker_box)
+    ax.text(FULL_X + docker_pad, row7_y + row7_h + docker_pad - 0.05,
+            "Two-stage Docker image", fontsize=9.5, weight="bold",
+            color="#0277BD", va="top")
+
+    # Two service boxes inside
+    svc_w = (FULL_W - 0.6) / 2
+    _box(ax, FULL_X + 0.05, row7_y + 0.05, svc_w, row7_h - 0.1,
+         "FastAPI service\n/health · /recommend/{student_id} · /decompose/{student_id}/{item_id}",
+         fc="#E0F2F1", ec="#00695C", fontsize=10.5)
+    _box(ax, FULL_X + svc_w + 0.55, row7_y + 0.05, svc_w, row7_h - 0.1,
+         "Streamlit transparency dashboard\nRecommendation Explorer · Fairness View · Ablation Comparison",
+         fc="#E0F2F1", ec="#00695C", fontsize=10.5)
+    _arrow(ax, centre_x, row6_y, centre_x, row7_y + row7_h + docker_pad + 0.03)
+    # API -> Dashboard arrow (within the Docker box)
+    api_right = FULL_X + 0.05 + svc_w
+    dash_left = FULL_X + svc_w + 0.55
+    ax.annotate("", xy=(dash_left, row7_y + row7_h / 2),
+                xytext=(api_right, row7_y + row7_h / 2),
+                arrowprops=dict(arrowstyle="-|>", color="#00695C",
+                                lw=1.4, mutation_scale=14))
 
     # --- Legend ------------------------------------------------------------
     legend_handles = [
         mpatches.Patch(facecolor="#FFF3E0", edgecolor="#E65100", label="Raw input"),
         mpatches.Patch(facecolor="#E3F2FD", edgecolor="#1565C0", label="Preprocessing"),
-        mpatches.Patch(facecolor="#F1F8E9", edgecolor="#33691E",
-                       label="Persisted artefact"),
-        mpatches.Patch(facecolor="#FFEBEE", edgecolor="#B71C1C",
-                       label="Implemented baseline"),
-        mpatches.Patch(facecolor="#E8EAF6", edgecolor="#283593",
-                       label="Planned model"),
-        mpatches.Patch(facecolor="#FFF8E1", edgecolor="#FF6F00",
-                       label="Final hybrid"),
+        mpatches.Patch(facecolor="#F1F8E9", edgecolor="#33691E", label="Persisted artefact"),
+        mpatches.Patch(facecolor="#FFEBEE", edgecolor="#B71C1C", label="Baseline recommender"),
+        mpatches.Patch(facecolor="#E8EAF6", edgecolor="#283593", label="Personalised recommender"),
+        mpatches.Patch(facecolor="#FFF8E1", edgecolor="#FF6F00", label="Hybrid ensemble"),
+        mpatches.Patch(facecolor="#EDE7F6", edgecolor="#4527A0", label="Two-stage reranker"),
         mpatches.Patch(facecolor="#F3E5F5", edgecolor="#6A1B9A", label="Evaluation"),
+        mpatches.Patch(facecolor="#E0F2F1", edgecolor="#00695C", label="Service layer"),
     ]
     ax.legend(
         handles=legend_handles,
         loc="lower center",
-        bbox_to_anchor=(0.5, -0.07),
-        ncol=7,
+        bbox_to_anchor=(0.5, -0.06),
+        ncol=5,
         fontsize=9.5,
         frameon=False,
     )
 
     ax.set_title(
-        "Figure 3.1 — Pipeline architecture",
+        "Figure 3.1 — Pipeline and serving architecture (as delivered)",
         fontsize=13,
         weight="bold",
         loc="left",
