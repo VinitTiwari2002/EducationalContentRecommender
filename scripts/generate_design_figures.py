@@ -4,9 +4,9 @@ Run:
     .venv/bin/python scripts/generate_design_figures.py
 
 Output:
-    Draft-Report/figures/fig_3_1_pipeline.png
-    Draft-Report/figures/fig_3_2_recommendation_example.png
-    Draft-Report/figures/fig_3_3_score_decomposition.png
+    Final-Report/figures/fig_3_1_pipeline.png
+    Final-Report/figures/fig_3_2_recommendation_example.png
+    Final-Report/figures/fig_3_3_score_decomposition.png
 
 Figures 3.2 and 3.3 pull real output from the persisted Hybrid recommender
 (under data/processed/models/, produced by `python -m src.pipeline
@@ -31,7 +31,7 @@ from src import oulad  # noqa: E402
 from src.hybrid import HybridRecommender  # noqa: E402
 from src.persistence import DEFAULT_MODELS_DIR, artefacts_exist, load_models  # noqa: E402
 
-FIG_DIR = PROJECT_ROOT / "Draft-Report" / "figures"
+FIG_DIR = PROJECT_ROOT / "Final-Report" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 

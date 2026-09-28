@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Build the draft report PDF from the chapter markdown files.
+# Build the final report PDF from the chapter markdown files.
 #
 # Prerequisites (macOS):
 #   brew install pandoc basictex pandoc-crossref
 #   eval "$(/usr/libexec/path_helper)"   # picks up tlmgr after basictex install
 #
 # Usage:
-#   cd Draft-Report && ./build.sh
+#   cd Final-Report && ./build.sh
 
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-OUT="draft-report.pdf"
+OUT="final-report.pdf"
 
 # Pandoc pulls YAML metadata + section structure from the title page,
 # concatenates the six chapters, and appends the reference list.

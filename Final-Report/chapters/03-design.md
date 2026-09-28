@@ -92,7 +92,7 @@ The project runs across twenty calendar weeks, from **10 May 2026** (project sta
 
 | Weeks (dates) | Milestone | Deliverable | Effort | Depends on | Risk & contingency |
 |---|---|---|---:|---|---|
-| 19 (10 Sep – 18 Sep) | Draft-feedback incorporation + final-report writing | All 6 chapters finalised against marker feedback; word-count trim to ≤ 10,500 w | ~25 h | Draft feedback received (received 28 Sep) | Late feedback — start immediately, hold Week 20 pure for video |
+| 19 (10 Sep – 18 Sep) | Draft-feedback incorporation + final-report writing | All 6 chapters finalised against marker feedback; word-count trim to ≤ 10,500 w | ~25 h | Draft feedback received | Late feedback — start immediately, hold Week 20 pure for video |
 | 20 (19 Sep – 25 Sep) | Video (3–5 min MP4) + PDF polish | Demo video; final PDF ≤ 15 MB; screenshots refreshed | ~15 h | All chapters green | Video overrun — script *before* recording |
 | — (26 Sep – 27 Sep) | Buffer + submission dry-run | Clean-env Docker rebuild verification; end-to-end submission dry-run | ~4 h | Video ready | Portal issues — submit ≥ 24 h early |
 | — (28 Sep) | **Submit final report** | Coursera upload | ~2 h | All above complete | — |
@@ -103,4 +103,4 @@ The project runs across twenty calendar weeks, from **10 May 2026** (project sta
 
 **Cut-line policy — retrospective.** Two items originally deferred to future work moved *back* into the delivered scope during Weeks 16–18: the FastAPI service + dashboard (previously stretch) and the LambdaMART two-stage reranker (previously listed as post-project). The knowledge-tracing component and the grade-prediction diagnostic remain in [@sec:conclusion] as future work.
 
-**Top risks for the remaining two weeks.** (i) Video overrun of the 5-minute cap — cited in prelim feedback — mitigated by scripting *before* recording; (ii) `implicit` install failure on a marker's machine — mitigated by pinned deps and the two-stage Docker image (§4.9), whose runtime stage is verified against a clean container in the Week 26 dry-run.
+**Top risks for the remaining two weeks.** (i) Video overrun of the 5-minute cap — cited in prelim feedback — mitigated by scripting *before* recording; (ii) `implicit` install failure on a marker's machine — mitigated by pinned deps and the two-stage Docker image (§4.9), whose runtime stage is verified against a clean container in the pre-submission dry-run.

@@ -1,6 +1,6 @@
 """Generate the workplan Gantt chart for Chapter 3 (§3.8).
 
-Produces Draft-Report/figures/fig_3_4_workplan_gantt.png.
+Produces Final-Report/figures/fig_3_4_workplan_gantt.png.
 
 Timeline: 2026-05-10 (project start) → 2026-09-28 (CM3070 final submission).
 Twenty weeks total, split into completed phases (rendered with hatch fill)
@@ -174,7 +174,7 @@ def main() -> None:
 
     fig.tight_layout()
 
-    out = Path(__file__).resolve().parents[1] / "Draft-Report" / "figures" / "fig_3_4_workplan_gantt.png"
+    out = Path(__file__).resolve().parents[1] / "Final-Report" / "figures" / "fig_3_4_workplan_gantt.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=180, bbox_inches="tight")
     print(f"Wrote {out}")
