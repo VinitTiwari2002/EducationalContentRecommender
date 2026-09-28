@@ -26,22 +26,9 @@ Every recommender implements the same three-method contract — `fit`, `score(us
 
 ## Data Ingestion and Preprocessing
 
-`oulad.py` loads the seven OULAD CSVs into a frozen dataclass with type coercion; missing values encoded as `"?"` (notably `imd_band` and un-marked assessment scores) are converted to NaN so numeric columns stay numeric.
+`oulad.py` loads the seven OULAD CSVs into a frozen dataclass; `"?"` sentinels (notably `imd_band` and unmarked assessments) become NaN.
 
-`preprocess.py::build_split` aggregates `sum_click` per `(id_student, id_site)` inside each of the two temporal windows, produces `scipy.sparse.csr_matrix` matrices of shape (26,074 × 6,268), and records the per-user course-scoped candidate index. Two design elements from Chapter 3 are enforced here.
-
-**Course-scoping** is a hard constraint: each `id_site` belongs to exactly one `(code_module, code_presentation)`, and a per-user candidate array is precomputed from `studentRegistration` intersected with the user's presentations, so every recommender's candidate pool is restricted to items the user could actually access.
-
-**Time-decay** weights the training-window clicks by `exp(-λ × (cutoff − date))` before the CSR matrix is built:
-
-```python
-if apply_decay and decay_rate > 0:
-    weights = df["sum_click"].to_numpy(np.float32) * np.exp(
-        -decay_rate * (cutoff - df["date"].to_numpy(np.float32))
-    )
-```
-
-The test-window matrix is *not* decayed — the label is a binary "did this user click item *i* in the future window?" regardless of magnitude. Empirically the best λ was 0.01 (Chapter 5).
+`preprocess.py::build_split` aggregates `sum_click` per `(id_student, id_site)` inside each temporal window, producing `scipy.sparse.csr_matrix` matrices of shape (26,074 × 6,268), and records the per-user course-scoped candidate index. **Course-scoping** is a hard constraint: each `id_site` belongs to exactly one `(code_module, code_presentation)`, and per-user candidate arrays are precomputed from `studentRegistration ∩ studentVle`. **Time-decay** weights training clicks by `exp(-λ × (cutoff − date))` before CSR construction (test labels are undecayed binary); empirically the best λ was 0.01 (Chapter 5).
 
 ## Item Features
 
@@ -56,38 +43,31 @@ The last feature also serves as the outcome vector consumed by the outcome-weigh
 
 ## The Seven Recommenders
 
-**Random** samples uniformly from the candidate pool with a `numpy.random.default_rng` seeded from `random_state`. Deterministic reproducibility.
+**Random** — uniform sample from the candidate pool via seeded `numpy.random.default_rng`.
 
-**Popularity** precomputes `item_totals = np.asarray(train.sum(axis=0)).ravel()` at fit time, then per-user ranks the intersection of `item_totals` with the user's candidate pool. Surprisingly hard to beat in education because course-central resources dominate the click distribution.
+**Popularity** — precomputes `item_totals = train.sum(axis=0)` once, then per-user ranks their intersection with the candidate pool. Surprisingly hard to beat because course-central resources dominate.
 
-**SVDRecommender** applies `scipy.sparse.linalg.svds` to `log1p(train)`, returning `user_factors[u] · S · V^T[:, i]` as the score. Rank *k* is a tuned hyperparameter. The design chapter mentioned an L2 λ term following Koren, Bell & Volinsky (2009); truncated SVD has no explicit λ — the truncation itself provides regularisation via low-rank approximation — so the implementation only tunes *k*. This is documented as a design deviation below.
+**SVDRecommender** — `scipy.sparse.linalg.svds` on `log1p(train)`, scoring `user_factors[u] · S · V^T[:, i]`. Truncation is the sole regulariser (Koren, Bell & Volinsky, 2009) — no explicit λ, documented as a design deviation below.
 
-**ALSRecommender** wraps `implicit.als.AlternatingLeastSquares`. Confidence is `c(u, i) = 1 + α · clicks(u, i)`; the algorithm alternates least-squares updates over user and item factors until convergence. `n_factors`, `regularization`, and `alpha` are all tuned. This is the canonical implicit-feedback CF baseline (Hu, Koren & Volinsky, 2008), added at implementation time because the design chapter did not specify it and empirical results (below) motivated including it as a first-class recommender.
+**ALSRecommender** — wraps `implicit.als.AlternatingLeastSquares` with confidence `c(u,i) = 1 + α · clicks(u,i)` (Hu, Koren & Volinsky, 2008); `n_factors`, `regularization`, `alpha` all tuned. Added at implementation time when tuning `SVD` surfaced the missing-λ gap.
 
-**ContentRecommender** L2-normalises the item feature matrix once at fit time and computes each user's profile as the click-weighted mean of accessed-item features:
+**ContentRecommender** — L2-normalises the item feature matrix at fit time, computes each user profile as the click-weighted mean of accessed-item features (`train @ features_norm`, row-normalised), and scores by dot product — cosine similarity.
 
-```python
-raw_profiles = train @ item_features_norm
-user_profiles = raw_profiles / np.linalg.norm(raw_profiles, axis=1, keepdims=True)
-```
+**HybridRecommender** — combines CF and content sub-models with the outcome vector: `α · minmax(cf) + β · minmax(content) + γ · minmax(outcome)`, min-max applied *within the candidate pool* so weights remain interpretable. `set_weights()` updates weights without refitting, which makes the 21-point simplex-grid tuning cheap.
 
-The score for candidate *i* is then the dot product of the L2-normalised item feature with the L2-normalised user profile — equivalent to cosine similarity.
-
-**HybridRecommender** takes CF and Content sub-models (typically pre-fitted for cheap tuning) and combines their per-candidate score vectors with an outcome vector: `alpha · minmax(cf) + beta · minmax(content) + gamma · minmax(outcome)`. Min-max is applied *within the candidate pool* so weights remain interpretable regardless of course-scoping. A `set_weights` method updates weights without refitting, which is what makes the 21-point simplex grid tuning cheap: fit the components once, sweep the weights.
-
-**GatedHybridRecommender** routes each user to Popularity if their training clicks are below a threshold (default 10) and to the tuned Hybrid otherwise. The gate is a single comparison at recommend time; both sub-models are fit at construction time.
+**GatedHybridRecommender** — routes users with fewer than `threshold` training clicks to Popularity, others to the tuned Hybrid. Gate is a single comparison at recommend time.
 
 ## Design Deviations Discovered During Implementation
 
-The four changes below are not isolated defects; they form an iteration narrative in which each empirical result unlocked the next design decision. The starting point was the preliminary design (SVD + content + outcome hybrid with fixed weights). Running the pipeline surfaced that SVD had no λ to tune, which motivated adding ALS. Tuning ALS in turn revealed it underperformed SVD on OULAD's implicit-feedback distribution, which motivated dropping CF from the hybrid weight simplex. The ablation confirming CF's negative contribution motivated stratifying by warm/cold users, which surfaced that Popularity beats every personalised model on cold users — motivating the switching (gated) hybrid. Time-decay was added last as a data-preprocessing question raised by the "recency matters in learning" pedagogical prior in §3.2. Each deviation is documented below with its trigger and its consequence, in the order the code was written. Documenting them here is what the marker asks for under "critical evaluation of the project so far".
+Four deviations form an iteration narrative rather than isolated defects: SVD had no λ to tune → added ALS; ALS underperformed SVD → dropped CF from the simplex; ablation confirmed CF's negative contribution → stratified warm/cold; Popularity beat every personalised model on cold users → gated hybrid.
 
-**Truncated SVD has no λ.** The design chapter listed `λ ∈ {0.01, 0.05, 0.1}` as a tuning grid, but `scipy.sparse.linalg.svds` is unregularised beyond the truncation itself. Regularised MF would have required a different library (`implicit`, or a hand-written ALS). The workaround was to add ALS as a first-class recommender rather than force regularisation onto SVD; this converted a design gap into a clean empirical comparison between the two CF families.
+**Truncated SVD has no λ.** The design chapter listed `λ ∈ {0.01, 0.05, 0.1}`, but `scipy.sparse.linalg.svds` is unregularised beyond truncation itself. I added ALS as a first-class recommender rather than force regularisation onto SVD — converting a design gap into a clean empirical CF-family comparison.
 
-**ALS underperforms SVD on OULAD.** The tuning grid explored `n_factors ∈ {32, 64, 128} × regularisation ∈ {0.01, 0.1} × alpha ∈ {1, 10, 40}` — 18 configurations — and the best ALS achieved NDCG@10 = 0.149 on the validation split vs. SVD's 0.167. Contrary to expectation from the implicit-feedback literature, plain SVD beat ALS at every confidence level tried, and higher alphas made ALS worse. My interpretation: OULAD click distributions have a heavy positive tail per user (browsing behaviour), so treating each click as strongly confident overfits the within-course structure and destroys generalisation to held-out clicks. This is a real empirical finding to report, not a bug — and it motivates the gated hybrid design decision that follows.
+**ALS underperforms SVD on OULAD.** The 18-point ALS grid produced best NDCG@10 = 0.149 vs SVD's 0.167 on the validation split. Contrary to the implicit-feedback literature, plain SVD beat ALS at every confidence level, and higher α made ALS worse. My interpretation: OULAD click distributions have heavy positive per-user tails (browsing behaviour), so strong confidence overfits within-course structure and destroys held-out generalisation. This is a real empirical finding to report.
 
-**Hybrid weight tuning drops the CF signal entirely.** Grid search over `(α, β, γ)` on the simplex consistently selected `(α=0.0, β=0.8, γ=0.2)`. In other words, both SVD- and ALS-backed hybrid configurations concluded that adding CF to content + outcome hurts NDCG. The single-split ablation confirms this: the `hybrid_no_cf` variant beats `hybrid_full` at fixed weights. Kept as a documented empirical finding rather than papered over.
+**Hybrid weight tuning drops CF entirely.** The simplex grid selected `(α=0.0, β=0.8, γ=0.2)` for both SVD- and ALS-backed configurations; the ablation's `hybrid_no_cf` beats `hybrid_full` at fixed weights. Kept as a documented finding, not papered over.
 
-**Gated hybrid was introduced after the cold-start analysis.** Splitting users into warm (≥10 training clicks) and cold cohorts revealed that Popularity outperforms every personalised model on cold users. A Burke-switching hybrid (Burke, 2002) — Popularity for cold, tuned Hybrid for warm — recovers the cold-user regime without hurting warm performance and is now the default deployed recommender in the pipeline.
+**Gated hybrid introduced after cold-start analysis.** Cold users (<10 training clicks) turned out to be a distinct regime where Popularity beat every personalised model. A Burke-switching hybrid (Burke, 2002) — Popularity for cold, tuned Hybrid for warm — recovers the cold-user regime without hurting warm performance, and is the default deployed recommender.
 
 ## Two-Stage Reranking with LambdaMART
 
@@ -113,24 +93,7 @@ Every recommender takes a `random_state` and every metric is deterministic. The 
 
 ## Pipeline CLI and Outputs
 
-`python -m src.pipeline` runs the three-pass pipeline end-to-end. CLI flags expose the interesting knobs:
-
-```
---rebuild-split          Force rebuild of cached split
---k 5 10 20              Evaluate at multiple K
---no-course-scoping      Diagnostic: reproduce the prelim's Pop@10 = 0.00003
---no-cv                  Skip 5-fold CV (fast dev-loop)
---no-tuning              Skip hyperparameter tuning
---cold-start-threshold N Threshold for warm/cold split (default 10)
---hybrid-grid-step S     Simplex step for hybrid weights (default 0.2)
---decay-rate R           Time-decay rate on training clicks (default 0.0)
---persist-models         Save fitted recommenders + serving context to
-                         data/processed/models/ for the FastAPI service.
-```
-
-The LambdaMART reranker is trained via a separate script: `python scripts/train_reranker.py` produces `evaluation/reranker_results.csv`, `evaluation/reranker_importance.csv`, and persists the booster to `data/processed/models/reranker.joblib`.
-
-The pipeline writes 11 CSV files to `evaluation/`, each one directly citable from Chapter 5: `baseline_results`, `metrics_with_ci`, `popularity_bias`, `fairness_audit`, `hybrid_ablation`, `paired_t_tests` (with the Bonferroni column), `cold_start_results`, `tuning_svd`, `tuning_als`, `tuning_hybrid`, and `cv_results`. Chapter 5 reads directly from these artefacts.
+`python -m src.pipeline` runs the three-pass pipeline end-to-end; CLI flags expose the interesting knobs — `--rebuild-split`, `--k 5 10 20`, `--no-course-scoping` (reproduces the prelim's Pop@10 = 0.00003 diagnostic), `--no-cv`, `--no-tuning`, `--cold-start-threshold`, `--hybrid-grid-step`, `--decay-rate`, `--persist-models` (writes to `data/processed/models/` for the FastAPI service). The LambdaMART reranker is trained via `python scripts/train_reranker.py`. The pipeline writes 11 CSVs to `evaluation/` (`baseline_results`, `metrics_with_ci`, `popularity_bias`, `fairness_audit`, `hybrid_ablation`, `paired_t_tests`, `cold_start_results`, `tuning_{svd,als,hybrid}`, `cv_results`) each directly cited from Chapter 5.
 
 ## Selected Results Preview
 
@@ -148,4 +111,55 @@ To close the implementation chapter with the sort of "visual representation of r
 
 *Table 4.1 — Primary-split metrics at K=10 (decay=0.01, tuned weights). GatedHybrid leads on P@10 and OWP@10, tying Hybrid on NDCG@10 and HR@10, while covering the cold-user regime that pure Hybrid loses to Popularity. Full analysis in [@sec:evaluation].*
 
-The single-split total is an 18% relative gain in P@10 for GatedHybrid over the pre-tuning fixed-weight hybrid (0.233 in the preliminary report) — the concrete pay-off of the design deviations documented above. Figure 3.3 in the design chapter renders the per-candidate score decomposition that produced the top-*K* list; the Streamlit dashboard (Section 3.5) will surface the same decomposition interactively for any student in the test set.
+The single-split total is an 18% relative gain in P@10 for GatedHybrid over the pre-tuning fixed-weight hybrid (0.233 in the preliminary report) — the concrete pay-off of the design deviations documented above. Figure 3.3 renders the per-candidate score decomposition for the top-*K* list; the Streamlit dashboard (§4.9) surfaces the same decomposition interactively for any student in the test set.
+
+## Service Layer: FastAPI, Streamlit, Docker {#sec:impl-service}
+
+The offline pipeline is packaged behind a service layer so a marker can query the recommender interactively without re-running any experiment. Three components: a **FastAPI** JSON service, a **Streamlit** transparency dashboard, and a **two-stage Docker image** that installs the Cython `implicit` dependency deterministically.
+
+**Persistence (`src/persistence.py`).** `python -m src.pipeline --persist-models` writes three artefacts to `data/processed/models/`: `models.joblib` (dict of the seven fitted recommenders + the LambdaMART booster), `serving_context.joblib` (student/item index, per-user course-scoped candidate arrays, outcome vector, cutoff date), and a JSON `manifest.json` recording tuned hyperparameters, git commit, and shape metadata so the marker can verify what they loaded.
+
+**FastAPI (`src/api.py`).** Three read-only endpoints, loading the persisted artefacts once at lifespan startup so request cost is a small numpy operation:
+
+```
+GET /health                            → loaded roster, n_students, n_items, cutoff_date
+GET /recommend/{student_id}?k=10&model=Hybrid
+                                       → top-K item_ids with rank; Hybrid/GatedHybrid
+                                         responses additionally include (cf_weighted,
+                                         content_weighted, outcome_weighted, total).
+GET /decompose/{student_id}/{item_id}  → un-normalised (cf_raw, content_raw,
+                                         outcome_raw) plus the weighted decomposition
+                                         within the user's candidate pool.
+```
+
+An example round-trip from `curl` against the running image:
+
+```json
+$ curl -s http://localhost:8000/recommend/6516?k=3
+{"student_id":6516,"model":"Hybrid","k":3,
+ "items":[
+   {"item_id":546652,"rank":1,"cf_weighted":0.00,"content_weighted":0.79,
+    "outcome_weighted":0.15,"total":0.94},
+   {"item_id":546614,"rank":2,"cf_weighted":0.00,"content_weighted":0.76,
+    "outcome_weighted":0.14,"total":0.90},
+   {"item_id":546643,"rank":3,"cf_weighted":0.00,"content_weighted":0.72,
+    "outcome_weighted":0.16,"total":0.88}]}
+```
+
+Course-scoping is enforced server-side: `/recommend` intersects the model's output with `serving_context.user_candidates[row]` before returning, so the JSON response can never leak items from presentations the student is not enrolled in. Twelve unit tests (`tests/test_api.py` + `tests/test_persistence.py`) cover 404 paths for unknown students/items, the uninitialised-service `/health` degraded response, decomposition math parity with `hybrid.score_breakdown`, and the round-trip of every fitted recommender through joblib.
+
+**Streamlit (`dashboard/app.py`).** Three pages sitting on top of the FastAPI service:
+
+1. *Recommendation Explorer* — student ID input, K slider, model selector; renders the top-*K* table with a stacked bar chart of `(cf, content, outcome)` weighted contributions and a per-item audit view that calls `/decompose`.
+2. *Fairness View* — grouped bar charts of Precision@10, NDCG@10, and OWP@10 broken down by gender / IMD band / disability, driven by `evaluation/fairness_audit.csv`, with the warm/cold cold-start breakdown underneath.
+3. *Ablation Comparison* — side-by-side top-*K* lists for Content, Hybrid, and GatedHybrid on the same student, highlighting rank divergences that indicate the switching branch has activated.
+
+The dashboard is deliberately a *transparency* artefact: it exists so a marker can query any student in the test set and see both the recommendations *and* the reasons behind them. Screenshots of the three pages appear as Figures 4.1–4.3.
+
+![Figure 4.1 — Recommendation Explorer for student 6516: the top-10 GatedHybrid output with a stacked-bar decomposition (CF blue / Content orange / Outcome green) and the per-item audit metric row.](figures/fig_4_1_dashboard_recommendation_explorer.png){width=95%}
+
+![Figure 4.2 — Fairness View: per-attribute Precision@10 breakdown for GatedHybrid across gender, IMD band, and disability, with warm/cold cold-start table below.](figures/fig_4_2_dashboard_fairness_view.png){width=95%}
+
+![Figure 4.3 — Ablation Comparison: side-by-side top-10 lists for Content, Hybrid, and GatedHybrid on the same student, exposing rank divergences where the switching branch is active.](figures/fig_4_3_dashboard_ablation.png){width=95%}
+
+**Docker (`Dockerfile`).** Two-stage build. Stage 1 (`build`) installs `build-essential`, `libopenblas-dev`, `liblapack-dev`, and `gfortran` on `python:3.12-slim-bookworm` and compiles `implicit` + every other requirement into a venv. Stage 2 (`runtime`) copies the venv into a fresh slim image with only `libopenblas0` and `libgomp1`, serves the FastAPI app on port 8000 via uvicorn, and health-checks `/health`. One `docker build ... && docker run` reproduces the running service on any Docker host — the concrete answer to the `implicit` install risk flagged in the design chapter and the artefact used for the clean-environment verification (§3.8).
