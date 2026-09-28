@@ -97,7 +97,7 @@ Every recommender takes a `random_state` and every metric is deterministic. The 
 
 ## Selected Results Preview
 
-To close the implementation chapter with the sort of "visual representation of results" the report guidelines call for, Table 4.1 previews the current headline P@10 on the primary temporal split (decay = 0.01, tuned hyperparameters). Full metric tables with confidence intervals, cross-validation means, ablation deltas, and cold-start stratification are the subject of [@sec:evaluation].
+Table 4.1 previews headline P@10 on the primary temporal split (decay = 0.01, tuned hyperparameters); full CI/CV/ablation/cold-start analysis is in [@sec:evaluation].
 
 | Model | P@10 | NDCG@10 | HR@10 | OWP@10 |
 |---|---:|---:|---:|---:|
@@ -109,15 +109,15 @@ To close the implementation chapter with the sort of "visual representation of r
 | Hybrid | 0.275 | 0.303 | 0.784 | 0.287 |
 | **GatedHybrid** | **0.276** | **0.303** | 0.784 | **0.287** |
 
-*Table 4.1 — Primary-split metrics at K=10 (decay=0.01, tuned weights). GatedHybrid leads on P@10 and OWP@10, tying Hybrid on NDCG@10 and HR@10, while covering the cold-user regime that pure Hybrid loses to Popularity. Full analysis in [@sec:evaluation].*
+*Table 4.1 — Primary-split metrics at K=10 (decay=0.01, tuned weights). GatedHybrid leads P@10 and OWP@10, ties Hybrid on NDCG@10 and HR@10, and covers the cold-user regime pure Hybrid loses to Popularity.*
 
-The single-split total is an 18% relative gain in P@10 for GatedHybrid over the pre-tuning fixed-weight hybrid (0.233 in the preliminary report) — the concrete pay-off of the design deviations documented above. Figure 3.3 renders the per-candidate score decomposition for the top-*K* list; the Streamlit dashboard (§4.9) surfaces the same decomposition interactively for any student in the test set.
+The single-split total is an 18% relative P@10 gain for GatedHybrid over the pre-tuning fixed-weight hybrid (0.233 in the prelim) — the pay-off of the design deviations above. Figure 3.3 renders the per-candidate score decomposition; the Streamlit dashboard (§4.9) surfaces it interactively for any student.
 
 ## Service Layer: FastAPI, Streamlit, Docker {#sec:impl-service}
 
-The offline pipeline is packaged behind a service layer so a marker can query the recommender interactively without re-running any experiment. Three components: a **FastAPI** JSON service, a **Streamlit** transparency dashboard, and a **two-stage Docker image** that installs the Cython `implicit` dependency deterministically.
+The offline pipeline is packaged behind a service layer so a marker can query it interactively without re-running any experiment. Three components: a **FastAPI** service, a **Streamlit** transparency dashboard, and a **two-stage Docker image** that installs `implicit` deterministically.
 
-**Persistence (`src/persistence.py`).** `python -m src.pipeline --persist-models` writes three artefacts to `data/processed/models/`: `models.joblib` (dict of the seven fitted recommenders + the LambdaMART booster), `serving_context.joblib` (student/item index, per-user course-scoped candidate arrays, outcome vector, cutoff date), and a JSON `manifest.json` recording tuned hyperparameters, git commit, and shape metadata so the marker can verify what they loaded.
+**Persistence (`src/persistence.py`).** `python -m src.pipeline --persist-models` writes `models.joblib` (fitted recommenders + LambdaMART booster), `serving_context.joblib` (student/item index, per-user candidates, outcome vector, cutoff date), and `manifest.json` (tuned hyperparameters, git commit, shape metadata) so the marker can verify what they loaded.
 
 **FastAPI (`src/api.py`).** Three read-only endpoints, loading the persisted artefacts once at lifespan startup so request cost is a small numpy operation:
 
@@ -132,19 +132,17 @@ GET /decompose/{student_id}/{item_id}  → un-normalised (cf_raw, content_raw,
                                          within the user's candidate pool.
 ```
 
-An example round-trip from `curl` against the running image:
+A real round-trip against the running service (persisted Hybrid, $\alpha=0.0, \beta=0.8, \gamma=0.2$):
 
 ```json
-$ curl -s http://localhost:8000/recommend/6516?k=3
-{"student_id":6516,"model":"Hybrid","k":3,
- "items":[
-   {"item_id":546652,"rank":1,"cf_weighted":0.00,"content_weighted":0.79,
-    "outcome_weighted":0.15,"total":0.94},
-   {"item_id":546614,"rank":2,"cf_weighted":0.00,"content_weighted":0.76,
-    "outcome_weighted":0.14,"total":0.90},
-   {"item_id":546643,"rank":3,"cf_weighted":0.00,"content_weighted":0.72,
-    "outcome_weighted":0.16,"total":0.88}]}
+$ curl -s 'http://localhost:8000/recommend/6516?k=3&model=Hybrid'
+{"student_id":6516,"model":"Hybrid","k":3,"items":[
+ {"item_id":877059,"rank":1,"cf_weighted":0.00,"content_weighted":0.80,"outcome_weighted":0.12,"total":0.92},
+ {"item_id":877032,"rank":3,"cf_weighted":0.00,"content_weighted":0.76,"outcome_weighted":0.03,"total":0.79},
+ {"item_id":877042,"rank":4,"cf_weighted":0.00,"content_weighted":0.62,"outcome_weighted":0.06,"total":0.68}]}
 ```
+
+`/decompose/6516/877059` returns the raw component scores (CF = 0.91, content cosine = 0.94, mean-score = 73.2/100) alongside the pool-normalised weighted contributions summing to `total` — what makes each recommendation explainable.
 
 Course-scoping is enforced server-side: `/recommend` intersects the model's output with `serving_context.user_candidates[row]` before returning, so the JSON response can never leak items from presentations the student is not enrolled in. Twelve unit tests (`tests/test_api.py` + `tests/test_persistence.py`) cover 404 paths for unknown students/items, the uninitialised-service `/health` degraded response, decomposition math parity with `hybrid.score_breakdown`, and the round-trip of every fitted recommender through joblib.
 
@@ -156,10 +154,14 @@ Course-scoping is enforced server-side: `/recommend` intersects the model's outp
 
 The dashboard is deliberately a *transparency* artefact: it exists so a marker can query any student in the test set and see both the recommendations *and* the reasons behind them. Screenshots of the three pages appear as Figures 4.1–4.3.
 
-![Figure 4.1 — Recommendation Explorer for student 6516: the top-10 GatedHybrid output with a stacked-bar decomposition (CF blue / Content orange / Outcome green) and the per-item audit metric row.](figures/fig_4_1_dashboard_recommendation_explorer.png){width=95%}
+![Figure 4.1 — Recommendation Explorer screenshot: student 6516, K=10, model=Hybrid. Top-10 table, stacked-bar score decomposition (CF blue at $\alpha=0$; content orange dominates; outcome red is the $\gamma$-weighted residual), and Rank-1 per-item audit tiles (CF 0.0000/raw 0.910; Content 0.7940/raw cosine 0.944; Outcome 0.1088/raw mean-score 73.2; Total 0.9028).](figures/fig_4_1_dashboard_recommendation_explorer.png){width=95%}
 
-![Figure 4.2 — Fairness View: per-attribute Precision@10 breakdown for GatedHybrid across gender, IMD band, and disability, with warm/cold cold-start table below.](figures/fig_4_2_dashboard_fairness_view.png){width=95%}
+![Figure 4.2a — Fairness View, gender + IMD band, driven by `fairness_audit.csv`. Gender: M (n=9,233) P@10 = 0.29, F (n=8,329) 0.26. IMD: 11 bands, P@10 range 0.26–0.31, no clear deprivation gradient.](figures/fig_4_2a_dashboard_fairness_gender+imd.png){width=95%}
 
-![Figure 4.3 — Ablation Comparison: side-by-side top-10 lists for Content, Hybrid, and GatedHybrid on the same student, exposing rank divergences where the switching branch is active.](figures/fig_4_3_dashboard_ablation.png){width=95%}
+![Figure 4.2b — Fairness View, disability + cold-start table (`cold_start_results.csv`). Disability N vs Y: 0.28 vs 0.26. On the cold cohort ($n=155$) Popularity's P@10 = 0.20 beats every personalised model — the observation that motivated the GatedHybrid switching recommender.](figures/fig_4_2b_dashboard_fairness_disability+coldWarm.png){width=95%}
 
-**Docker (`Dockerfile`).** Two-stage build. Stage 1 (`build`) installs `build-essential`, `libopenblas-dev`, `liblapack-dev`, and `gfortran` on `python:3.12-slim-bookworm` and compiles `implicit` + every other requirement into a venv. Stage 2 (`runtime`) copies the venv into a fresh slim image with only `libopenblas0` and `libgomp1`, serves the FastAPI app on port 8000 via uvicorn, and health-checks `/health`. One `docker build ... && docker run` reproduces the running service on any Docker host — the concrete answer to the `implicit` install risk flagged in the design chapter and the artefact used for the clean-environment verification (§3.8).
+![Figure 4.3 — Ablation Comparison for student 6516 (K=10). Content, Hybrid, GatedHybrid columns side-by-side. Hybrid and GatedHybrid coincide (warm user; switching branch routes to Hybrid); Content diverges from rank 4 onward.](figures/fig_4_3_dashboard_ablation.png){width=95%}
+
+**Docker (`Dockerfile`).** Two-stage build. Stage 1 (`build`) installs `build-essential`, `libopenblas-dev`, `liblapack-dev`, and `gfortran` on `python:3.12-slim-bookworm` and compiles `implicit` + every other requirement into a venv. Stage 2 (`runtime`) copies the venv into a fresh slim image with only `libopenblas0` and `libgomp1`, serves the FastAPI app on port 8000 via uvicorn, and health-checks `/health`. One `docker build ... && docker run` reproduces the running service on any Docker-compatible host — the concrete answer to the `implicit` install risk flagged in the design chapter.
+
+**Clean-environment verification.** The build was reproduced from scratch against the Finch container runtime (drop-in Docker-CLI compatible, `containerd v2.2.1 / runc 1.4.0`): `finch build -t recsys:latest .` compiles `implicit` and all Python deps into the stage-1 venv in ~76 s, and the stage-2 runtime image exports in a further ~52 s. `finch run -p 8000:8000 -v $(pwd)/data:/app/data recsys:latest`, then `/health` returns `{"status":"ready","n_models":7,"n_students":26074,"n_items":6268,"cutoff_date":172}`; `/recommend/6516?k=3&model=Hybrid` returns the same top-3 as the host run (item 877059 with content=0.80, outcome=0.11, total=0.91 — matching the JSON above to float rounding). This exercises the full stack — Cython compile, joblib load, FastAPI startup, course-scoped intersection — on a stock Debian-slim image with no host-Python leakage, the clean-environment reproducibility check the draft feedback requested.

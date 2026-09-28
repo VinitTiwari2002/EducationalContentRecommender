@@ -34,7 +34,7 @@ Table 5.1 reports every model at $K = 10$ on the primary 80/20 temporal split (c
 | Hybrid | 0.275 | 0.303 | 0.784 | 0.287 | 0.41 | 0.77 |
 | **GatedHybrid** | **0.276** | **0.303** | 0.784 | **0.287** | 0.37 | 0.75 |
 
-*Table 5.1 — Primary-split metrics at K=10 (decay=0.01, tuned weights; n_users = 17,562). Half-widths of 95% percentile bootstrap CIs on the per-user metric mean (1,000 resamples, per-user array): every P@10 and NDCG@10 half-width is ≤ ±0.006, every OWP@10 half-width is ≤ ±0.007, and CIs do not overlap between adjacent-rank models except Hybrid vs GatedHybrid. Full per-metric CI table in `evaluation/metrics_with_ci.csv`.*
+*Table 5.1 — Primary-split metrics at K=10 (decay=0.01, tuned weights; n_users = 17,562). Half-widths of 95% percentile bootstrap CIs on the per-user metric mean (1,000 resamples, per-user array): P@10 ≤ ±0.004, NDCG@10 ≤ ±0.004, OWP@10 ≤ ±0.004, Hit-Rate@10 ≤ ±0.008, Recall@10 ≤ ±0.002. CIs do not overlap between adjacent-rank models except Hybrid vs GatedHybrid. Full per-metric CI table in `evaluation/metrics_with_ci.csv`.*
 
 Two findings stand out. First, Content alone reaches P@10 = 0.269 — the outcome signal buys only a further two-point improvement, and CF signals (SVD, ALS) individually underperform Content by ~5 points. Second, the hybrid tuner selected $\alpha = 0.0, \beta = 0.8, \gamma = 0.2$ on the tuning-validation split — i.e. it dropped CF entirely. On OULAD, content and outcome are the load-bearing signals; the ablation in §5.5 corroborates this.
 
@@ -42,27 +42,27 @@ Hybrid and GatedHybrid have overlapping aggregate CIs on P@10 (±0.006) and NDCG
 
 ## Cross-Validation Results
 
-Table 5.2 reports mean metrics across five temporal folds (cutoffs at dates 25, 54, 100, 143, 194 for folds 5–1). Relative ordering matches the primary split: GatedHybrid > Hybrid > Content > Popularity > ALS > SVD > Random.
+Table 5.2 reports mean metrics across five temporal folds sliding back through the training timeline in 15% chunks. Relative ordering matches the primary split: GatedHybrid > Hybrid > Content > Popularity > SVD > ALS > Random.
 
 | Model | P@10 | NDCG@10 | Coverage | Gini |
 |---|---:|---:|---:|---:|
-| **GatedHybrid** | **0.209** | **0.242** | 0.35 | 0.73 |
-| Hybrid | 0.206 | 0.239 | 0.38 | 0.76 |
-| Content | 0.201 | 0.231 | 0.38 | 0.74 |
-| Popularity | 0.196 | 0.221 | 0.29 | 0.70 |
-| ALS | 0.183 | 0.201 | 0.32 | 0.62 |
-| SVD | 0.181 | 0.211 | 0.36 | 0.58 |
+| **GatedHybrid** | **0.196** | **0.224** | 0.36 | 0.73 |
+| Hybrid | 0.193 | 0.221 | 0.39 | 0.75 |
+| Content | 0.186 | 0.211 | 0.39 | 0.74 |
+| Popularity | 0.173 | 0.193 | 0.29 | 0.69 |
+| SVD | 0.163 | 0.188 | 0.37 | 0.58 |
+| ALS | 0.162 | 0.176 | 0.33 | 0.62 |
 | Random | 0.046 | 0.047 | 1.00 | 0.30 |
 
 *Table 5.2 — Five-fold temporal-CV means at K=10 (decay=0.01, tuned weights).*
 
-Per-fold standard deviations for Hybrid / GatedHybrid are 0.026 / 0.024 — larger than Content's 0.009 but smaller than Popularity's 0.039. Fold 5 (earliest cutoff, date 25) drives most variance; later folds are tighter. The CV means confirm the primary-split ranking is not an artefact of the specific 80/20 cutoff.
+Per-fold standard deviations at K=10 are: Hybrid 0.011, GatedHybrid 0.009, Content 0.009, Random 0.007 (all tight), versus Popularity 0.039, ALS 0.038, SVD 0.032 (much noisier). The earliest fold, where training data is smallest, drives most of that variance for the personalised CF/popularity models; the hybrid and content models are essentially fold-invariant. The CV means confirm the primary-split ranking is not an artefact of the specific 80/20 cutoff.
 
 ## Statistical Significance
 
-The preliminary-report feedback asked whether a paired test over five folds carries enough evidence. I address this by testing on per-user metric arrays ($n = 17{,}562$) rather than five-fold means — each user contributes an independent paired observation. `evaluation/paired_t_tests.csv` reports the paired-$t$ statistic and both raw and Bonferroni-adjusted (across five metrics) $p$-values for GatedHybrid versus every other model at $K=10$.
+The preliminary-report feedback asked whether a paired test over five folds carries enough evidence. I address this by testing on per-user metric arrays ($n = 17{,}562$) rather than five-fold means — each user contributes an independent paired observation. `evaluation/paired_t_tests.csv` reports the paired-$t$ statistic and both raw and Bonferroni-adjusted (across five metrics) $p$-values for Hybrid versus every other model at $K=10$.
 
-GatedHybrid beats Random, Popularity, SVD, and ALS on every metric with adjusted $p \approx 0$; beats Content on precision, recall, NDCG, and OWP with adjusted $p < 10^{-16}$; loses to Content on Hit-Rate@10 by a small margin (0.784 vs 0.790, adjusted $p = 0.007$) — a real trade-off: Content places at least one hit for slightly more users, GatedHybrid ranks those hits higher (NDCG). Between Hybrid and GatedHybrid the aggregate paired-$t$ is not significant on any metric because the two differ only on the ~1% of users classified as cold; §5.6 shows where the differences that matter live.
+Hybrid beats Random, Popularity, SVD, and ALS on every metric with adjusted $p$ ≤ $8 \times 10^{-79}$ (numerically indistinguishable from zero for the four ranking-quality metrics). Against Content, Hybrid wins on precision, recall, NDCG, and OWP with adjusted $p \le 5 \times 10^{-5}$, and loses on Hit-Rate@10 by a small margin (0.784 vs 0.790, adjusted $p = 5 \times 10^{-4}$) — a real trade-off: Content places at least one hit for slightly more users, Hybrid ranks its hits higher (which is what NDCG rewards). Against GatedHybrid, Hybrid loses on precision and OWP by tiny but significant margins (adjusted $p \approx 10^{-3}$; the two models differ only on the ~1% of cold users, where GatedHybrid routes to Popularity and reclaims the small aggregate edge documented in §5.7) and ties on NDCG and Hit-Rate.
 
 ## Ablation Study
 

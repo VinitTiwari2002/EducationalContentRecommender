@@ -37,3 +37,19 @@
 16. Zawacki-Richter, O., Marín, V.I., Bond, M. and Gouverneur, F., 2019. Systematic review of research on artificial intelligence applications in higher education — where are the educators? *International Journal of Educational Technology in Higher Education*, 16(1), Article 39, pp.1–27.
 
 17. Zehlike, M., Yang, K. and Stoyanovich, J., 2022. Fairness in ranking, Part I: Score-based ranking. *ACM Computing Surveys*, 55(6), Article 118, pp.1–36.
+
+18. Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q. and Liu, T.-Y., 2017. LightGBM: A highly efficient gradient boosting decision tree. *Advances in Neural Information Processing Systems*, 30, pp.3146–3154.
+
+19. Frederickson, B., 2018. `implicit`: Fast Python collaborative filtering for implicit datasets. Version 0.7. GitHub: benfred/implicit.
+
+20. Herlocker, J.L., Konstan, J.A., Terveen, L.G. and Riedl, J.T., 2004. Evaluating collaborative filtering recommender systems. *ACM Transactions on Information Systems*, 22(1), pp.5–53.
+
+21. Adomavicius, G. and Tuzhilin, A., 2005. Toward the next generation of recommender systems: A survey of the state-of-the-art and possible extensions. *IEEE Transactions on Knowledge and Data Engineering*, 17(6), pp.734–749.
+
+22. Yudelson, M.V., Koedinger, K.R. and Gordon, G.J., 2013. Individualized Bayesian knowledge tracing models. In: *Proceedings of the 16th International Conference on Artificial Intelligence in Education (AIED)*, pp.171–180.
+
+23. Baker, R.S. and Inventado, P.S., 2014. Educational data mining and learning analytics. In: *Learning Analytics: From Research to Practice*. Springer, New York, pp.61–75.
+
+24. Efron, B. and Tibshirani, R.J., 1993. *An Introduction to the Bootstrap*. Chapman & Hall, New York.
+
+25. Ramírez-Correa, P.E., Rondán-Cataluña, F.J., Arenas-Gaitán, J. and Alfaro-Pérez, J.L., 2017. Moderating effect of learning styles on a learning management system's success. *Telematics and Informatics*, 34(1), pp.272–286.
