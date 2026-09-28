@@ -109,6 +109,61 @@ class HybridRecommender:
             + self.gamma * _minmax(oc)
         )
 
+    def score_breakdown(
+        self,
+        user_row: int,
+        items: np.ndarray | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Return the per-item score decomposition for a user.
+
+        For each item, exposes the raw component scores (unnormalised), the
+        min-max-normalised component scores over `items`, each component
+        weighted by its hybrid weight, and the summed total. The dashboard
+        audit view consumes this to explain *why* an item was ranked where
+        it was; the /decompose FastAPI endpoint passes a single-element
+        `items` array to get a per-pair decomposition.
+
+        Parameters
+        ----------
+        user_row: row index in the interaction matrix.
+        items: item-column indices to explain (default: full catalogue).
+
+        Returns
+        -------
+        dict with keys `items`, `cf_raw`, `content_raw`, `outcome_raw`,
+        `cf_norm`, `content_norm`, `outcome_norm`, `cf_weighted`,
+        `content_weighted`, `outcome_weighted`, `total`. All arrays are
+        aligned with `items` in the returned order.
+        """
+        if self._outcome_score is None:
+            raise RuntimeError("fit() must be called before score_breakdown()")
+        items_arr = (
+            np.arange(self._n_items) if items is None else np.asarray(items).ravel()
+        )
+        cf_raw = self.cf.score(user_row)[items_arr]
+        content_raw = self.content.score(user_row)[items_arr]
+        outcome_raw = self._outcome_score[items_arr]
+        cf_norm = _minmax(cf_raw)
+        content_norm = _minmax(content_raw)
+        outcome_norm = _minmax(outcome_raw)
+        cf_weighted = self.alpha * cf_norm
+        content_weighted = self.beta * content_norm
+        outcome_weighted = self.gamma * outcome_norm
+        total = cf_weighted + content_weighted + outcome_weighted
+        return {
+            "items": items_arr,
+            "cf_raw": cf_raw,
+            "content_raw": content_raw,
+            "outcome_raw": outcome_raw,
+            "cf_norm": cf_norm,
+            "content_norm": content_norm,
+            "outcome_norm": outcome_norm,
+            "cf_weighted": cf_weighted,
+            "content_weighted": content_weighted,
+            "outcome_weighted": outcome_weighted,
+            "total": total,
+        }
+
     def recommend(
         self,
         user_row: int,

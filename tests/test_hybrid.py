@@ -91,3 +91,53 @@ def test_excludes_seen(tiny_setup):
     model.fit(train, features, outcome)
     recs = model.recommend(0, k=5)  # user 0 has seen 0, 1
     assert 0 not in recs and 1 not in recs
+
+
+def test_score_breakdown_full_catalogue(tiny_setup):
+    train, features, outcome = tiny_setup
+    model = HybridRecommender(alpha=0.5, beta=0.3, gamma=0.2)
+    model.fit(train, features, outcome)
+    bd = model.score_breakdown(user_row=2)
+    # All arrays are length n_items = 4 and aligned with items.
+    assert bd["items"].tolist() == [0, 1, 2, 3]
+    for key in ("cf_raw", "content_raw", "outcome_raw",
+                "cf_norm", "content_norm", "outcome_norm",
+                "cf_weighted", "content_weighted", "outcome_weighted", "total"):
+        assert bd[key].shape == (4,)
+    # Weighted sums to total.
+    np.testing.assert_allclose(
+        bd["total"],
+        bd["cf_weighted"] + bd["content_weighted"] + bd["outcome_weighted"],
+        atol=1e-6,
+    )
+    # Normalised components are all in [0, 1].
+    for key in ("cf_norm", "content_norm", "outcome_norm"):
+        assert float(bd[key].min()) >= 0.0
+        assert float(bd[key].max()) <= 1.0 + 1e-6
+
+
+def test_score_breakdown_subset(tiny_setup):
+    train, features, outcome = tiny_setup
+    model = HybridRecommender(alpha=0.5, beta=0.3, gamma=0.2)
+    model.fit(train, features, outcome)
+    bd = model.score_breakdown(user_row=2, items=np.array([1, 3]))
+    assert bd["items"].tolist() == [1, 3]
+    # outcome_raw for item 3 (90) > item 1 (50).
+    assert bd["outcome_raw"][1] > bd["outcome_raw"][0]
+
+
+def test_score_breakdown_single_item(tiny_setup):
+    train, features, outcome = tiny_setup
+    model = HybridRecommender()
+    model.fit(train, features, outcome)
+    bd = model.score_breakdown(user_row=0, items=np.array([2]))
+    assert bd["items"].shape == (1,)
+    # Single item → each normalised component is 0 (min == max).
+    assert float(bd["cf_norm"][0]) == 0.0
+    assert float(bd["content_norm"][0]) == 0.0
+    assert float(bd["outcome_norm"][0]) == 0.0
+
+
+def test_score_breakdown_before_fit_raises():
+    with pytest.raises(RuntimeError):
+        HybridRecommender().score_breakdown(user_row=0)
