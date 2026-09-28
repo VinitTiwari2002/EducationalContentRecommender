@@ -1,0 +1,23 @@
+# Local caches + venv (installed fresh in the image).
+.venv/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Report sources are not needed in the runtime image.
+Preliminary-Report/
+Draft-Report/
+Proposal/
+Resources/
+notebooks/
+evaluation/
+
+# Raw + processed data is mounted at runtime, not baked in.
+data/
+
+# Build tooling / editor state.
+.git/
+.gitignore
+.claude/
+.DS_Store
